@@ -1,0 +1,47 @@
+# copy to config.toml and edit. everything here has a default in sim.py.
+
+agent = "llm"          # "llm" (openai-compatible), "anthropic" (native claude sdk) or "echo"
+ticks = 100            # run until this tick number (not shown to agents)
+rows = 3
+cols = 3
+# world_seed = 1234    # fixes wiring, port shuffles and agent seeds. random if unset.
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true   # write each agent's per-tick prompt into ticks.jsonl
+# port_bits = 128     # bits per port, multiple of 4 up to 128. narrow channels make spelling expensive
+# port_mode = "hex"   # "pixels": each port is a pixel_size x pixel_size 24-bit rgb image, shown to agents as pictures
+# pixel_size = 9
+# pixel_scale = 16    # how much the pictures are blown up for the model
+# task = ""           # "naming": score a point per input port equal to your q0, shown each tick
+# byte_ban = [0x20, 0x7e] # reject output bytes in this range, e.g. to rule out printable ascii
+
+[llm]                  # these are the settings the showcase run used
+base_url = "https://api.openai.com/v1"  # any openai-compatible endpoint (vllm, openrouter, cerebras, ...)
+model = "gpt-6.1-sol"
+api_key_env = "OPENAI_API_KEY"          # name of the env var holding the key, never the key itself
+temperature = ""       # "" = don't send it (openai reasoning models reject it)
+max_tokens = 16000     # reasoning tokens count toward this
+max_tokens_param = "max_completion_tokens"  # vllm and most others want "max_tokens"
+timeout = 300          # drop this to ~30 for fast providers, so a hung call gets retried quickly
+retries = 3
+max_concurrency = 9
+
+[llm.extra_body]       # merged into the request body verbatim
+reasoning_effort = "high"
+
+[anthropic]            # used when agent = "anthropic"
+model = "claude-opus-5-5"
+api_key_env = "ANTHROPIC_API_KEY"   # env var name only. unset -> sdk falls back to `ant auth login`
+effort = "medium"      # low | medium | high | xhigh | max. thinking is always on for opus 5.5
+max_tokens = 16000     # thinking counts toward this
+fallbacks = ""         # "default" reruns a refused call on another model (logged as usage.served_by).
+                       # off: every answer is from `model`, and a refused turn writes nothing.
+timeout = 600
+retries = 3
+max_concurrency = 9
+
+[echo]                 # fake agent for testing the plumbing
+delay = 1              # copy inputs seen this many ticks ago
+shift = 1              # p_i is copied to q_(i+shift); 0 reflects back to the sender
+beacon_period = 7      # every n ticks (phase set by seed) write a fresh random value
+malformed_rate = 0.05  # fraction of replies that are deliberately broken

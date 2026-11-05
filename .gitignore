@@ -1,0 +1,6 @@
+.env
+config.toml
+runs/
+_local/
+__pycache__/
+*.bak
