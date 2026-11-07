@@ -27,6 +27,26 @@ card (its verification attention kernel is fixed at four, see the fork's `docs/s
 Quincy has 28 slots. Lowering the context does not add slots on this hardware. A grid can still be
 bigger than 28: the extra agents queue for a slot, and a tick takes longer.
 
+## How much more help our agents got
+
+The original gave nine gpt-6.1-sol agents the minimal prompt in `prompts/system.txt`, high reasoning effort, and
+nothing else: no hint that anyone else exists and no suggestion of how to talk. Our agents are a much smaller
+model (Qwen3.8-27B), and **we scaffolded them more than the original did**. Every addition, so results are
+read against the right baseline:
+
+| | original (gpt-6.1-sol) | ours (Qwen3.8-27B) |
+|---|---|---|
+| system prompt | `prompts/system.txt` | the same file, unchanged |
+| told others might exist | no | in primed runs: "you might not be alone." |
+| told how to talk | no | in the ASCII run: "a port value can also be read as ascii text, two hex characters per byte, which is one way to send a message." |
+| given questions to ask | no | in the five-questions run: "there are five questions you can ask: what are you? who am i? who are we? what are we? where are we?" |
+| reasoning | high effort | thinking **off**: less help, because thinking made ticks too slow at 100 agents |
+| world | 3×3 flat grid | 4×7 and 10×10 flat grids, and 10×10 tori (no dead edge ports) |
+
+Only the unprimed runs (`quincy-4x7-grid`, `10x10-grid-unprimed-partial`) are like-for-like with the original
+prompt, and in those all 28 agents concluded they were alone. Every primed result should be read as "with a
+hint", never as the original experiment.
+
 ## What changed in the code
 
 All additions are opt-in. With an upstream `config.toml`, `sim.py` and `eval.py` behave as before
@@ -79,6 +99,22 @@ The column definitions are in `analyze.py`'s docstring:
 - **names a neighbour:** share of agents that wrote a true neighbour's id into their notes, whether or
   not they understood it as an id.
 - **says "alone":** share of agents whose eval count answer was 1.
+
+### The same pictures as the original, at our scale
+
+These are drawn the way erz0r's `examples/sol-50` figures are: the replay uses `view.py`'s own tile renderer
+(180 px per tile, first 50 ticks, ~0.34 s per tick, status bar cropped), and the map figure follows `map.png`'s
+layout and colours. One visible difference: the original was rendered with Consolas, which this Linux machine
+does not have, so the tile text is DejaVu Sans Mono and wraps a few characters differently.
+`experiments/quincy/render_replay.py` and `render_map.py` make both for any run, grid or torus.
+
+**4×7 grid, unprimed, thinking off: first 50 ticks**
+
+![replay of the 4x7 run's first 50 ticks](experiments/quincy/runs/quincy-4x7-grid/replay.gif)
+
+**Its final answers: no agent drew a map, and all 28 said they were alone**
+
+![the 4x7 run's map figure: no map drawn, 0 of 28 placed](experiments/quincy/runs/quincy-4x7-grid/map.png)
 
 ### 1. Thinking is too slow at this scale, and its tail grows
 
