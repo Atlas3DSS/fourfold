@@ -1,3 +1,5 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Fourfold Torus</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -75,11 +77,14 @@ label.ctl input[type=range] { width: 150px; }
   label.ctl input[type=range] { width: 110px; }
 }
 @media (prefers-reduced-motion: reduce) { button.play:hover { background: transparent; } }
+#logo { height: 28px; width: auto; align-self: center; }
 </style>
+<style id="theme">/*THEME*/</style>
 
 <div id="stage" aria-label="3D view of the agent lattice"></div>
 
 <header class="hud">
+  <img id="logo" alt="" hidden>
   <h1>Fourfold Torus</h1>
   <div class="facts" id="facts"></div>
   <select id="dataset" aria-label="Run"></select>
@@ -112,6 +117,8 @@ label.ctl input[type=range] { width: 150px; }
 <script>
 (() => {
 const DATA = JSON.parse(document.getElementById("datasets").textContent);
+const logoSrc = getComputedStyle(document.documentElement).getPropertyValue("--logo").trim().replace(/^["']|["']$/g, "");
+if (logoSrc) { const l = document.getElementById("logo"); l.src = logoSrc; l.alt = "Atlas"; l.hidden = false; }
 const css = getComputedStyle(document.documentElement);
 const tok = n => new THREE.Color(css.getPropertyValue(n).trim());
 const STATE = [
@@ -207,7 +214,7 @@ function build() {
   linkGeo.setAttribute("position", new THREE.BufferAttribute(lp, 3));
   linkGeo.setAttribute("color", new THREE.BufferAttribute(lc, 3));
   linkGeo.userData = { segs, STEPS };
-  linkObj = new THREE.LineSegments(linkGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+  linkObj = new THREE.LineSegments(linkGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 }));
   world.add(linkObj);
   shape(); paint(); frameCamera();
 }
