@@ -23,5 +23,7 @@ for spec in specs:
     sets.append({"label": label, "data": build(Path(path), int(src) if src else None)})
 tpl = (Path(__file__).resolve().parent / "viewer" / "torus.html").read_text(encoding="utf-8")
 blob = json.dumps(sets, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
-out.write_text(tpl.replace("/*THEME*/", theme).replace("/*DATASETS*/", blob), encoding="utf-8")
+import time  # noqa: E402
+out.write_text(tpl.replace("/*THEME*/", theme).replace("/*BUILT*/0", str(int(time.time())))
+               .replace("/*DATASETS*/", blob), encoding="utf-8")
 print(f"wrote {out} ({out.stat().st_size // 1024} KB, {len(sets)} runs)")

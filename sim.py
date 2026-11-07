@@ -71,6 +71,8 @@ DEFAULTS = {
         "max_concurrency": 9,
         "endpoint_concurrency": 0,  # per-endpoint cap when base_url is a list; 0 = only max_concurrency
         "routing": "pinned",        # list of endpoints: "pinned" (agent id % n) or "least_loaded"
+        "agent_extra_body": {},     # {"<agent index>": {...}} merged into that agent's requests only (e.g. a lace)
+        "agent_extra_body_file": "",  # same, read from a json file (keeps big steering vectors out of the run log)
         "extra_body": {},
     },
     "anthropic": {
@@ -534,6 +536,9 @@ class LLMAgent:
             sys.exit(f"config: llm.routing must be pinned or least_loaded, got {self.routing!r}")
         self.ep_sems = [asyncio.Semaphore(per) for _ in self.urls] if per > 0 else None
         self.router = Router(len(self.urls), per) if self.routing == "least_loaded" else None
+        self.per_agent = dict(cfg.get("agent_extra_body") or {})
+        if cfg.get("agent_extra_body_file"):
+            self.per_agent.update(json.loads(Path(cfg["agent_extra_body_file"]).read_text(encoding="utf-8")))
 
     @staticmethod
     def content(turn: Turn):
@@ -560,6 +565,7 @@ class LLMAgent:
         }
         if self.cfg.get("temperature") not in (None, ""):   # "" leaves it out (reasoning models reject it)
             body["temperature"] = self.cfg["temperature"]
+        body.update(self.per_agent.get(str(turn.state.id), {}))   # e.g. one agent's lace
         if self.router:
             return await self._act_routed(turn, body)
         last = None

@@ -78,6 +78,7 @@ label.ctl input[type=range] { width: 150px; }
 }
 @media (prefers-reduced-motion: reduce) { button.play:hover { background: transparent; } }
 #logo { height: 28px; width: auto; align-self: center; }
+button.fresh { background: var(--hot); color: var(--ink); border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-weight: 500; }
 </style>
 <style id="theme">/*THEME*/</style>
 
@@ -88,6 +89,7 @@ label.ctl input[type=range] { width: 150px; }
   <h1>Fourfold Torus</h1>
   <div class="facts" id="facts"></div>
   <select id="dataset" aria-label="Run"></select>
+  <button id="fresh" class="fresh" hidden>Newer ticks: load</button>
 </header>
 
 <aside class="hud" id="legend" aria-live="polite"></aside>
@@ -372,5 +374,17 @@ function loop(ts) {
   controls.update(); renderer.render(scene, camera);
 }
 load(0); requestAnimationFrame(loop);
+
+// the board rebuilds every few minutes; offer a reload when status.json says a newer build exists
+const BUILT = /*BUILT*/0;
+const fresh = document.getElementById("fresh");
+fresh.onclick = () => location.reload();
+async function checkFresh() {
+  try {
+    const r = await fetch("status.json", { cache: "no-store" });
+    if (r.ok) { const s = await r.json(); if (BUILT && s.built > BUILT + 30) fresh.hidden = false; }
+  } catch (e) { /* no status file where this page is hosted: nothing to offer */ }
+}
+if (BUILT) setInterval(checkFresh, 60000);
 })();
 </script>
