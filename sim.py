@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import copy
 import json
 import os
@@ -47,6 +48,7 @@ DEFAULTS = {
     "ticks": 100,
     "rows": 3,
     "cols": 3,
+    "topology": "grid",             # "grid" (outer ports dead) or "torus" (edges wrap round, no dead ports)
     "world_seed": None,
     "protocol_word_limit": 400,
     "log_lines_shown": 20,
@@ -57,6 +59,7 @@ DEFAULTS = {
     "pixel_scale": 16,              # pixels mode: screen pixels per image pixel in what the agent sees
     "task": "",                     # "" or "naming": a point per input port that equals your q0
     "byte_ban": None,               # e.g. [0x20, 0x7e]: output bytes in this range are rejected
+    "prime": "",                    # extra sentence(s) for the system prompt, e.g. "you might not be alone."
     "llm": {
         "base_url": "http://localhost:8000/v1",
         "model": "",
@@ -66,6 +69,8 @@ DEFAULTS = {
         "timeout": 180,
         "retries": 3,
         "max_concurrency": 9,
+        "endpoint_concurrency": 0,  # per-endpoint cap when base_url is a list; 0 = only max_concurrency
+        "routing": "pinned",        # list of endpoints: "pinned" (agent id % n) or "least_loaded"
         "extra_body": {},
     },
     "anthropic": {
@@ -117,7 +122,12 @@ def load_config(path: str | None) -> dict:
 
 # ---------------------------------------------------------------- world
 
-def build_world(rows: int, cols: int, rng: random.Random) -> list[dict]:
+def build_world(rows: int, cols: int, rng: random.Random, torus: bool = False) -> list[dict]:
+    """torus: a side on the boundary wraps to the opposite edge, so every port is live.
+    the rng draws are the same either way, so a world_seed gives the same ids and
+    port shuffles as a grid and as a torus."""
+    if torus and (rows < 3 or cols < 3):
+        sys.exit(f"config: a torus needs at least 3 rows and 3 cols, got {rows}x{cols}")
     agents = []
     for r in range(rows):
         for c in range(cols):
@@ -135,6 +145,8 @@ def build_world(rows: int, cols: int, rng: random.Random) -> list[dict]:
         for i, s in enumerate(a["port_sides"]):
             dr, dc = DELTA[s]
             rr, cc = r + dr, c + dc
+            if torus:
+                rr, cc = rr % rows, cc % cols
             if 0 <= rr < rows and 0 <= cc < cols:
                 b = agents[rr * cols + cc]
                 a["links"][i] = {"agent": b["id"], "port": b["port_sides"].index(OPP[s])}
@@ -208,6 +220,8 @@ def rules_text(cfg: dict) -> str:
     """extra rules for the system prompt's {rules} slot. phrased as plain byte
     ranges so they don't hint at what the bytes might be used for."""
     out = ""
+    if (cfg.get("prime") or "").strip():
+        out += "\n\n" + cfg["prime"].strip()
     if cfg.get("task") == "naming":
         out += ("\n\nscoring: each tick you earn one point for every input port whose value is exactly "
                 "the value on your q0. an all-zero value never earns points. your score is shown each tick.")
@@ -447,19 +461,79 @@ class EchoAgent:
         pass
 
 
+class Router:
+    """least-loaded choice among several endpoints. an endpoint that refuses the
+    connection is skipped for `cooldown` seconds, so a server that is down (or not
+    up yet) costs nothing and one that comes up later is used from then on."""
+
+    CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError)
+
+    def __init__(self, n: int, cap: int, cooldown: float = 30.0):
+        self.inflight = [0] * n
+        self.down_until = [0.0] * n
+        self.cap = cap if cap > 0 else 1 << 30
+        self.cooldown = cooldown
+        self.turn = 0
+        self.cond = asyncio.Condition()
+
+    def _pick(self):
+        now = time.monotonic()
+        ok = [i for i in range(len(self.inflight))
+              if self.down_until[i] <= now and self.inflight[i] < self.cap]
+        if not ok:
+            return None
+        self.turn += 1
+        n = len(self.inflight)
+        return min(ok, key=lambda i: (self.inflight[i], (i - self.turn) % n))
+
+    async def acquire(self, deadline: float) -> int:
+        async with self.cond:
+            while (ep := self._pick()) is None:
+                if time.monotonic() > deadline:
+                    raise TimeoutError("no endpoint available")
+                try:   # woken by a release, or re-check every few s for a cooled-down endpoint
+                    await asyncio.wait_for(self.cond.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    pass
+            self.inflight[ep] += 1
+            return ep
+
+    async def release(self, ep: int, down: bool = False):
+        async with self.cond:
+            self.inflight[ep] -= 1
+            if down:
+                self.down_until[ep] = time.monotonic() + self.cooldown
+            self.cond.notify_all()
+
+
 class LLMAgent:
     """one stateless chat completion per agent per tick. memory lives only in
-    the protocol and the log tail that the tick prompt shows back."""
+    the protocol and the log tail that the tick prompt shows back.
+
+    base_url may be a list of endpoints (e.g. one server per gpu). routing "pinned"
+    sends agent i to endpoint i % len(list), so its prefix cache stays on one server;
+    "least_loaded" sends each call to the live endpoint with the fewest calls in
+    flight. endpoint_concurrency caps the requests in flight on each server."""
 
     def __init__(self, cfg: dict):
         if not cfg.get("model"):
             sys.exit("config: llm.model is empty")
         self.cfg = cfg
-        self.url = cfg["base_url"].rstrip("/") + "/chat/completions"
+        bases = cfg["base_url"] if isinstance(cfg["base_url"], list) else [cfg["base_url"]]
+        if not bases:
+            sys.exit("config: llm.base_url is an empty list")
+        self.urls = [b.rstrip("/") + "/chat/completions" for b in bases]
         key = os.environ.get(cfg.get("api_key_env") or "", "") or "EMPTY"
         self.headers = {"Authorization": f"Bearer {key}"}
-        self.client = httpx.AsyncClient(timeout=float(cfg["timeout"]))
+        self.client = httpx.AsyncClient(timeout=float(cfg["timeout"]),
+                                        limits=httpx.Limits(max_connections=None, max_keepalive_connections=None))
         self.sem = asyncio.Semaphore(int(cfg["max_concurrency"]))
+        per = int(cfg.get("endpoint_concurrency") or 0)
+        self.routing = cfg.get("routing") or "pinned"
+        if self.routing not in ("pinned", "least_loaded"):
+            sys.exit(f"config: llm.routing must be pinned or least_loaded, got {self.routing!r}")
+        self.ep_sems = [asyncio.Semaphore(per) for _ in self.urls] if per > 0 else None
+        self.router = Router(len(self.urls), per) if self.routing == "least_loaded" else None
 
     @staticmethod
     def content(turn: Turn):
@@ -486,26 +560,64 @@ class LLMAgent:
         }
         if self.cfg.get("temperature") not in (None, ""):   # "" leaves it out (reasoning models reject it)
             body["temperature"] = self.cfg["temperature"]
+        if self.router:
+            return await self._act_routed(turn, body)
         last = None
-        async with self.sem:
+        ep = turn.state.id % len(self.urls)
+        ep_sem = self.ep_sems[ep] if self.ep_sems else contextlib.nullcontext()
+        async with self.sem, ep_sem:
             for attempt in range(int(self.cfg["retries"]) + 1):
                 try:
-                    r = await self.client.post(self.url, json=body, headers=self.headers)
-                    r.raise_for_status()
-                    data = r.json()
-                    msg = data["choices"][0]["message"]
-                    return Reply(
-                        raw=msg.get("content") or "",
-                        reasoning=msg.get("reasoning_content") or msg.get("reasoning"),
-                        usage=data.get("usage"),
-                    )
+                    r = await self.client.post(self.urls[ep], json=body, headers=self.headers)
+                    return self._reply(r, ep)
                 except Exception as e:  # network, http status, bad json: all retried
-                    detail = ""
-                    if isinstance(e, httpx.HTTPStatusError):
-                        detail = " " + e.response.text[:300]
-                    last = f"{type(e).__name__}: {e}{detail}"
+                    last = self._describe(e)
                     await asyncio.sleep(min(30, 2 ** attempt))
-        return Reply(error=f"llm request failed after retries: {last}")
+        where = f" (endpoint {ep}: {self.urls[ep]})" if len(self.urls) > 1 else ""
+        return Reply(error=f"llm request failed after retries{where}: {last}")
+
+    def _reply(self, r, ep: int) -> Reply:
+        r.raise_for_status()
+        data = r.json()
+        msg = data["choices"][0]["message"]
+        usage = data.get("usage")
+        if len(self.urls) > 1:
+            usage = {**(usage or {}), "endpoint": ep}
+        return Reply(raw=msg.get("content") or "",
+                     reasoning=msg.get("reasoning_content") or msg.get("reasoning"), usage=usage)
+
+    @staticmethod
+    def _describe(e: Exception) -> str:
+        detail = " " + e.response.text[:300] if isinstance(e, httpx.HTTPStatusError) else ""
+        return f"{type(e).__name__}: {e}{detail}"
+
+    async def _act_routed(self, turn: Turn, body: dict) -> Reply:
+        """least_loaded: each attempt goes to the live endpoint with the fewest calls in
+        flight. a refused connection marks that endpoint down and retries elsewhere at once."""
+        last, ep = None, None
+        attempts, budget = 0, int(self.cfg["retries"]) + 1
+        deadline = time.monotonic() + float(self.cfg["timeout"])
+        async with self.sem:
+            while attempts < budget:
+                try:
+                    ep = await self.router.acquire(deadline)
+                except TimeoutError as e:
+                    last = f"{e} for {self.cfg['timeout']}s"
+                    break
+                down = False
+                try:
+                    r = await self.client.post(self.urls[ep], json=body, headers=self.headers)
+                    return self._reply(r, ep)
+                except Exception as e:
+                    last = self._describe(e)
+                    down = isinstance(e, Router.CONNECT_ERRORS)
+                finally:
+                    await self.router.release(ep, down)
+                attempts += 1
+                if not down:
+                    await asyncio.sleep(min(30, 2 ** attempts))
+        where = f" (last endpoint {ep}: {self.urls[ep]})" if ep is not None else ""
+        return Reply(error=f"llm request failed after retries{where}: {last}")
 
     async def close(self):
         await self.client.aclose()
@@ -692,12 +804,13 @@ def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
         "world_seed": world_seed,
         "rows": cfg["rows"],
         "cols": cfg["cols"],
+        "topology": cfg.get("topology", "grid"),
         "config": cfg,
         "prompts": {
             "system": (ROOT / "prompts" / "system.txt").read_text(encoding="utf-8"),
             "tick": (ROOT / "prompts" / "tick.txt").read_text(encoding="utf-8"),
         },
-        "agents": build_world(cfg["rows"], cfg["cols"], rng),
+        "agents": build_world(cfg["rows"], cfg["cols"], rng, torus=cfg.get("topology") == "torus"),
     }
     d = RUNS / run_id
     d.mkdir(parents=True, exist_ok=False)
@@ -801,6 +914,12 @@ def main():
     ap.add_argument("--resume", metavar="RUN", help="run id or path of a run to continue")
     ap.add_argument("--agent", choices=["llm", "anthropic", "echo"], help="override agent kind for a new run")
     ap.add_argument("--world-seed", type=int, help="override world seed for a new run")
+    ap.add_argument("--rows", type=int, help="override grid rows for a new run")
+    ap.add_argument("--cols", type=int, help="override grid cols for a new run")
+    ap.add_argument("--topology", choices=["grid", "torus"], help="override topology for a new run")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="override any config value for a new run, e.g. --set prime='' or "
+                         "--set llm.max_tokens=2048 (VALUE is read as toml, else as a string)")
     ap.add_argument("--view", action="store_true", help="also open the viewer, following this run live")
     args = ap.parse_args()
     load_dotenv()
@@ -818,6 +937,22 @@ def main():
             cfg["agent"] = args.agent
         if args.world_seed is not None:
             cfg["world_seed"] = args.world_seed
+        for k in ("rows", "cols", "topology"):
+            if getattr(args, k) is not None:
+                cfg[k] = getattr(args, k)
+        for kv in args.set:
+            key, _, raw = kv.partition("=")
+            try:
+                val = tomllib.loads(f"v = {raw}")["v"]
+            except tomllib.TOMLDecodeError:
+                val = raw
+            node = cfg
+            *path, last = key.strip().split(".")
+            for part in path:
+                node = node.setdefault(part, {})
+            node[last] = val
+        if cfg.get("topology", "grid") not in ("grid", "torus"):
+            sys.exit(f"config: topology must be grid or torus, got {cfg['topology']!r}")
         set_width(cfg)
         path, meta = new_run(cfg, args.run_id)
         states = restore_states(meta, [])

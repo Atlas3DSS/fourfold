@@ -1,5 +1,11 @@
 # fourfold
 
+> **This is a fork of [erz0r/fourfold](https://github.com/erz0r/fourfold)** by erz0r, who created the experiment,
+> the harness and the sol-50 result below. This fork runs it at scale on local V100s with a weaker model,
+> adds a torus world and a few prompt conditions: see **[EXPERIMENTS-QUINCY.md](EXPERIMENTS-QUINCY.md)**.
+> The rest of this README is erz0r's original.
+
+
 agentic cellular automata.
 
 ![replay of the first 50 ticks](examples/sol-50/replay.gif)

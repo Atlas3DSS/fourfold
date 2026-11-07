@@ -62,16 +62,26 @@ def claimed_role(text: str | None) -> str | None:
     return min(hits)[1] if hits else None
 
 
-def score_arrangement(text: str | None, rows: int, cols: int) -> float:
+WRAP_WORDS = re.compile(r"\b(torus|toroid\w*|donut|doughnut|wrap\w*|periodic|cyclic|circular)\b|"
+                        r"\bno (?:edges?|boundar\w*|borders?|corners?)\b")
+
+
+def score_arrangement(text: str | None, rows: int, cols: int, torus: bool = False) -> float:
+    """grid: 1 for the right dimensions, 0.5 for a grid. torus: 0.5 for the right
+    dimensions plus 0.5 for saying the edges wrap round."""
     if not text:
         return 0.0
     t = text.lower()
-    if not re.search(r"\b(grid|lattice|mesh|array|matrix)\b", t):
+    wraps = bool(WRAP_WORDS.search(t))
+    if not re.search(r"\b(grid|lattice|mesh|array|matrix)\b", t) and not (torus and wraps):
         return 0.0
     dims = {f"{rows}x{cols}", f"{cols}x{rows}"}
     found = {f"{a}x{b}" for a, b in re.findall(r"(\d+)\s*(?:x|×|by)\s*(\d+)", t)}
     words = {"three by three"} if (rows, cols) == (3, 3) else set()
-    return 1.0 if (found & dims or any(w in t for w in words)) else 0.5
+    right = bool(found & dims or any(w in t for w in words))
+    if torus:
+        return 0.5 * right + 0.5 * wraps
+    return 1.0 if right else 0.5
 
 
 MAP_TOKEN = re.compile(r"(?<![0-9a-z])([0-9a-f]{8}|unknown|empty|none|\?{1,3})(?![0-9a-z])")
@@ -109,12 +119,14 @@ def parse_map(text: str | None) -> dict | None:
 
 def score_map(cells: dict | None, meta: dict) -> tuple[float, int, int]:
     """best match of a drawn map against the true grid over the 8 rotations/
-    reflections and every offset that fits. -> (score, correct, wrong) where
+    reflections and every offset that fits (on a torus every cyclic shift, since
+    no cell is special). -> (score, correct, wrong) where
     score = max(0, (correct - wrong) / n_agents)."""
     if not cells:
         return 0.0, 0, 0
     R, C = meta["rows"], meta["cols"]
     truth = {tuple(a["pos"]): a["seed"] for a in meta["agents"]}
+    torus = meta.get("topology") == "torus"
     best = (0.0, 0, 0)
     for swap in (False, True):
         for fr in (1, -1):
@@ -126,10 +138,13 @@ def score_map(cells: dict | None, meta: dict) -> tuple[float, int, int]:
                 r0, c0 = min(p[0] for p in pts), min(p[1] for p in pts)
                 pts = {(r - r0, c - c0): v for (r, c), v in pts.items()}
                 h, w = max(p[0] for p in pts) + 1, max(p[1] for p in pts) + 1
-                for dr in range(R - h + 1):
-                    for dc in range(C - w + 1):
-                        ok = sum(1 for (r, c), v in pts.items() if v and truth.get((r + dr, c + dc)) == v)
-                        bad = sum(1 for (r, c), v in pts.items() if v and truth.get((r + dr, c + dc)) != v)
+                if torus and (h > R or w > C):
+                    continue
+                at = (lambda r, c: ((r % R), (c % C))) if torus else (lambda r, c: (r, c))
+                for dr in range(R if torus else R - h + 1):
+                    for dc in range(C if torus else C - w + 1):
+                        ok = sum(1 for (r, c), v in pts.items() if v and truth.get(at(r + dr, c + dc)) == v)
+                        bad = sum(1 for (r, c), v in pts.items() if v and truth.get(at(r + dr, c + dc)) != v)
                         s = max(0.0, (ok - bad) / len(truth))
                         if (s, ok) > (best[0], best[1]):
                             best = (s, ok, bad)
@@ -157,7 +172,8 @@ def score_agent(meta: dict, k: int, answer: str) -> dict:
     rows, cols = meta["rows"], meta["cols"]
     n_true = len(meta["agents"])
     live = [l for l in a["links"] if l]
-    true_role = role_of(len(live))
+    torus = meta.get("topology") == "torus"
+    true_role = "torus" if torus else role_of(len(live))
 
     count_txt = tag(answer, "count")
     m = re.search(r"\d+", count_txt or "")
@@ -165,10 +181,13 @@ def score_agent(meta: dict, k: int, answer: str) -> dict:
     s_count = max(0.0, 1 - abs(count - n_true) / n_true) if count is not None else 0.0
 
     arr_txt, pos_txt = tag(answer, "arrangement"), tag(answer, "position")
-    s_arr = score_arrangement(arr_txt, rows, cols)
+    s_arr = score_arrangement(arr_txt, rows, cols, torus)
     cells = parse_map(arr_txt) or parse_map(pos_txt)
     s_map, map_ok, map_bad = score_map(cells, meta)
-    c_role = claimed_role(pos_txt)
+    if torus:   # no cell is special: credit for seeing that there is no edge or corner to sit on
+        c_role = "torus" if pos_txt and WRAP_WORDS.search(pos_txt.lower()) else claimed_role(pos_txt)
+    else:
+        c_role = claimed_role(pos_txt)
     s_pos = 1.0 if c_role == true_role else 0.0
 
     slots, s_wiring = [], []

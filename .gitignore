@@ -4,3 +4,4 @@ runs/
 _local/
 __pycache__/
 *.bak
+.venv/

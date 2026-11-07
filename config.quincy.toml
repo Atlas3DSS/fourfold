@@ -1,0 +1,33 @@
+# fourfold on Quincy: 28 agents (4x7 grid) served by Flare, one Qwen3.8-27B
+# server per Tesla V100 (7 servers x 4 slots = 28 concurrent requests).
+# servers: quincy/flare_up.sh. preflight: quincy/smoke.py. run: quincy/run.sh.
+
+agent = "llm"
+ticks = 100
+rows = 4
+cols = 7
+# world_seed = 1234    # unset: random, recorded in the run's meta record
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+prime = "you might not be alone."   # owner, 2026-11-07: prime them with "i might not be alone"
+
+[llm]
+base_url = [
+  "http://127.0.0.1:9400/v1", "http://127.0.0.1:9401/v1", "http://127.0.0.1:9402/v1",
+  "http://127.0.0.1:9403/v1", "http://127.0.0.1:9404/v1", "http://127.0.0.1:9405/v1",
+  "http://127.0.0.1:9406/v1",
+]
+model = "qwen38-27b"            # flare --served-model-name
+api_key_env = "FLARE_API_KEY"   # servers run without auth; unset is fine
+temperature = ""                # package defaults (qwen3.8 thinking preset: t=1, top_p=0.95, top_k=20)
+max_tokens = 4096               # thinking off: a reply is log + protocol (<=400 words) + 4 ports, ~1k tokens
+max_tokens_param = "max_tokens"
+timeout = 600
+retries = 2
+max_concurrency = 1000          # the router below decides; agents beyond the slots wait their turn
+endpoint_concurrency = 4        # the sm_70 package's prepared capacity per server
+routing = "least_loaded"        # each call to the live server with the fewest in flight; a dead one is skipped
+
+[llm.extra_body]
+chat_template_kwargs = { enable_thinking = false }   # owner: thinking off, the tail latency grew every tick
