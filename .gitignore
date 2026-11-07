@@ -5,3 +5,6 @@ _local/
 __pycache__/
 *.bak
 .venv/
+# internal hand-off notes (name internal key and project paths): keep out of the public fork
+quincy/LACE-BRIEF.md
+flare-steer-build/

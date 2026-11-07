@@ -946,6 +946,8 @@ def main():
         for k in ("rows", "cols", "topology"):
             if getattr(args, k) is not None:
                 cfg[k] = getattr(args, k)
+        if args.ticks is not None:      # record the target so a later --resume runs to it too
+            cfg["ticks"] = args.ticks
         for kv in args.set:
             key, _, raw = kv.partition("=")
             try:

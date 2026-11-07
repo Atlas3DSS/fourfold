@@ -38,3 +38,11 @@ reply), then runs the sim and the eval. Resume a stopped run with `RUN_ID=<id> b
   least-loaded routing, so the 7th card joins when chemistry frees it): 10x10 then 20x20, 100 ticks each.
 - next: 20x20 torus. The server jobs end ~2026-11-08 11:30Z (14 h limit), so renew them before it:
   `sb stop` the old fourfold-flare-* jobs, then `quincy/flare_up.sh`.
+
+- 2026-11-07 23:19Z `q-10x10-torus-primed-open-1107-1519` (queue): 10x10 torus, primed, seed 20261107, 1000 ticks.
+- 2026-11-07 23:31Z `q-10x10-torus-five-questions-1107` (job fourfold-five-q, `quincy/run_one.sh`): same torus and seed,
+  prime "you might not be alone. there are five questions you can ask: what are you? who am i? who are we? what are
+  we? where are we?", 1000 ticks, sharing the 28 slots with the open torus.
+  Both were started before --ticks was recorded in the config: resume them with `--ticks 1000`
+  (queue line `resume <id> --ticks 1000`, or `.venv/bin/python sim.py --resume <id> --ticks 1000`).
+- Board: http://127.0.0.1:8820/ and the Neuropedia tab /fourfold.

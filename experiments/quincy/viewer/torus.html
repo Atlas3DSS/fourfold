@@ -323,8 +323,22 @@ function facts() {
 // ---------- interaction
 const sel = document.getElementById("dataset");
 DATA.forEach((d, i) => sel.add(new Option(d.label, i)));
-function load(i) {
-  D = DATA[i].data; frame = 0;
+// a run is either embedded ({label, data}) or fetched on first use ({label, url}), so the page stays small
+async function load(i) {
+  const entry = DATA[i], el = document.getElementById("legend");
+  if (!entry.data) {
+    el.innerHTML = `<h2>Loading</h2><div class="note">Fetching ${entry.label.replace(/[&<>]/g, "")}${entry.kb ? ` (${entry.kb >= 1024 ? (entry.kb / 1024).toFixed(1) + " MB" : entry.kb + " KB"})` : ""}…</div>`;
+    try {
+      const r = await fetch(entry.url, { cache: "no-cache" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      entry.data = await r.json();
+    } catch (e) {
+      el.innerHTML = `<h2>Could not load this run</h2><div class="note">${String(e.message).replace(/[&<>]/g, "")}. Reload the page to try again.</div>`;
+      return;
+    }
+    if (+sel.value !== i) return;      // the viewer picked another run while this one downloaded
+  }
+  D = entry.data; frame = 0;
   morph = D.topology === "torus" ? 1 : 0; document.getElementById("morph").value = morph * 1000;
   const m = document.getElementById("mode");
   [...m.options].forEach(o => o.disabled = (o.value === "influence" && D.source === undefined) || (o.value === "eval" && !D.eval));
@@ -332,19 +346,20 @@ function load(i) {
   mode = m.value; facts(); build();
 }
 sel.onchange = () => load(+sel.value);
-document.getElementById("mode").onchange = e => { mode = e.target.value; paint(); };
-document.getElementById("morph").oninput = e => { morph = e.target.value / 1000; shape(); };
-document.getElementById("scrub").oninput = e => { frame = +e.target.value; paint(); };
+document.getElementById("mode").onchange = e => { mode = e.target.value; if (D) paint(); };
+document.getElementById("morph").oninput = e => { morph = e.target.value / 1000; if (D) shape(); };
+document.getElementById("scrub").oninput = e => { frame = +e.target.value; if (D) paint(); };
 let playing = !reduce, last = 0;
 const playBtn = document.getElementById("play");
 const setPlay = p => { playing = p; playBtn.textContent = p ? "❚❚" : "▶"; playBtn.setAttribute("aria-label", p ? "Pause" : "Play"); };
-playBtn.onclick = () => { if (!playing && frame === D.frames.length - 1) frame = 0; setPlay(!playing); };
+playBtn.onclick = () => { if (D && !playing && frame === D.frames.length - 1) frame = 0; setPlay(!playing); };
 setPlay(playing);
 const spin = document.getElementById("spin"); if (reduce) spin.checked = false;
 
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), tip = document.getElementById("tip");
 renderer.domElement.addEventListener("pointermove", e => {
   mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  if (!D || !tileMesh) return;
   ray.setFromCamera(mouse, camera);
   const hit = ray.intersectObject(tileMesh)[0];
   if (!hit) { tip.hidden = true; return; }
@@ -366,7 +381,7 @@ addEventListener("resize", resize); resize();
 function loop(ts) {
   requestAnimationFrame(loop);
   const speed = +document.getElementById("speed").value;
-  if (playing && ts - last > 1000 / speed) {
+  if (D && playing && ts - last > 1000 / speed) {
     last = ts;
     if (frame < D.frames.length - 1) { frame++; paint(); } else setPlay(false);
   }

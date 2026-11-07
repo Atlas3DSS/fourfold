@@ -3,7 +3,7 @@
 # Edit runs/QUEUE while this runs: the next line is read only when the current run ends.
 #
 #   line formats (blank lines and # comments are skipped):
-#     resume <run_id>                       continue a stopped run to its configured tick count
+#     resume <run_id> [--ticks N]           continue a stopped run to its configured (or given) tick count
 #     <ROWS>x<COLS>[:torus] [@name] [--set k=v ...]   a new run from $CFG, e.g.
 #                                            10x10:torus @noprime --set prime=''
 #     stop                                   end the runner
@@ -24,9 +24,9 @@ while true; do
   [ "$line" = stop ] && { echo "== queue stopped $(date -Is)"; exit 0; }
   $PY quincy/smoke.py "$CFG" --wait "${WAIT_MIN:-120}" --min-up "${MIN_UP:-6}" || { echo "== smoke failed, line put back"; sed -i "1i $line" "$Q"; sleep 300; continue; }
   if [[ $line == resume\ * ]]; then
-    id=${line#resume }
+    read -r _ id more <<< "$line"
     echo "== $id resume $(date -Is)"
-    $PY sim.py --resume "$id"
+    $PY sim.py --resume "$id" $more
   else
     read -r shape rest <<< "$line"
     dims=${shape%%:*}; topo=grid; [[ $shape == *:torus ]] && topo=torus
