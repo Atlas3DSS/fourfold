@@ -53,6 +53,12 @@ All additions are opt-in. With an upstream `config.toml`, `sim.py` and `eval.py`
   general.
 - **Analysis** (`experiments/quincy/analyze.py`). It produces every number in the table below from
   `ticks.jsonl` and the eval file.
+- **Torus viewer** (`experiments/quincy/viewer/torus.html`, built by `build_viewer.py` from
+  `viz_data.py`). A 3D replay that bends the flat grid into a torus with a slider. Agents are coloured
+  by what they are doing, by influence spreading from one agent, or by their final answer. The
+  influence trace is strict origin taint: a value counts only if it first appeared at the source, or at
+  an agent the source had already reached, so relayed values never credit the source.
+  `python experiments/quincy/build_viewer.py out.html "label=runs/<run>" "label=runs/<run>@<agent>"`
 
 ## Results so far
 

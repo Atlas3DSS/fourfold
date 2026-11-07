@@ -1,0 +1,369 @@
+<title>Fourfold Torus</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* layout: the lattice fills the window; a slim header, a legend rail and a transport bar float over it */
+:root {
+  --ink: #111626;        /* night behind the lattice */
+  --panel: #1a2134e6;    /* floating panels */
+  --line: #2c3550;       /* hairlines, dim links */
+  --paper: #ece6d8;      /* text */
+  --muted: #9097ab;      /* secondary text */
+  --hot: #f0b44c;        /* accent: controls, lit links */
+  --s0: #2a3349; --s1: #3d8e9c; --s2: #d6a23f; --s3: #e06b3c; --s4: #f6eedb;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--ink); color: var(--paper); font-family: var(--mono); font-size: 13px; overflow: hidden; }
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; }
+.hud { position: fixed; z-index: 2; pointer-events: none; }
+.hud > * { pointer-events: auto; }
+header.hud {
+  top: env(safe-area-inset-top, 0px); left: 0; right: 0;
+  padding-block: 14px 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline;
+}
+h1 { font-family: var(--display); font-weight: 700; font-size: 24px; letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
+.facts { color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.facts b { color: var(--paper); font-weight: 500; }
+select, button, input[type=range] { font: inherit; color: var(--paper); }
+select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; max-width: 100%; }
+#legend {
+  right: max(16px, env(safe-area-inset-right, 0px)); top: calc(env(safe-area-inset-top, 0px) + 64px);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+  width: 220px; display: grid; gap: 8px;
+}
+#legend h2 { font-family: var(--display); font-size: 13px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.key { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; }
+.sw { width: 14px; height: 14px; border-radius: 3px; }
+.key .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+#ramp { height: 10px; border-radius: 3px; }
+.ramp-labels { display: flex; justify-content: space-between; color: var(--muted); }
+#transport {
+  left: 0; right: 0; bottom: 0;
+  padding-block: 12px calc(14px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: linear-gradient(to top, #111626f2, #11162600);
+  display: grid; grid-template-columns: auto auto 1fr auto; gap: 12px 14px; align-items: center;
+}
+#transport .row2 { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; color: var(--muted); }
+button.play { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--hot); background: transparent; cursor: pointer; }
+button.play:hover { background: #f0b44c22; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
+#tick { font-family: var(--display); font-weight: 500; font-size: 20px; font-variant-numeric: tabular-nums; min-width: 92px; }
+input[type=range] { accent-color: var(--hot); width: 100%; min-width: 0; }
+label.ctl { display: flex; gap: 8px; align-items: center; min-width: 0; }
+label.ctl input[type=range] { width: 150px; }
+.morph-ends { color: var(--muted); }
+#tip {
+  position: fixed; z-index: 3; pointer-events: none; max-width: min(340px, calc(100vw - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; line-height: 1.45;
+}
+#tip .who { font-family: var(--display); font-weight: 500; font-size: 14px; }
+#tip .st { display: inline-block; padding: 1px 7px; border-radius: 99px; color: var(--ink); font-size: 11px; margin-left: 6px; }
+#tip .log { color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
+.note { color: var(--muted); max-width: 60ch; }
+@media (max-width: 720px) {
+  #legend { top: auto; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); width: auto; left: max(16px, env(safe-area-inset-left, 0px)); grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  #legend h2, #legend .note { grid-column: 1 / -1; }
+  h1 { font-size: 20px; }
+  label.ctl input[type=range] { width: 110px; }
+}
+@media (prefers-reduced-motion: reduce) { button.play:hover { background: transparent; } }
+</style>
+
+<div id="stage" aria-label="3D view of the agent lattice"></div>
+
+<header class="hud">
+  <h1>Fourfold Torus</h1>
+  <div class="facts" id="facts"></div>
+  <select id="dataset" aria-label="Run"></select>
+</header>
+
+<aside class="hud" id="legend" aria-live="polite"></aside>
+
+<div class="hud" id="transport">
+  <button class="play" id="play" aria-label="Play">▶</button>
+  <div id="tick">t 0</div>
+  <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Tick">
+  <select id="mode" aria-label="Colour by">
+    <option value="state">colour: what each agent is doing</option>
+    <option value="influence">colour: influence from one agent</option>
+    <option value="eval">colour: final answer to "how many are there?"</option>
+  </select>
+  <div class="row2">
+    <label class="ctl"><span class="morph-ends">flat</span><input type="range" id="morph" min="0" max="1000" value="1000" aria-label="Bend the grid into a torus"><span class="morph-ends">torus</span></label>
+    <label class="ctl">speed<input type="range" id="speed" min="1" max="12" value="4" aria-label="Playback speed"></label>
+    <label class="ctl"><input type="checkbox" id="spin" checked> spin</label>
+    <span id="wiring"></span>
+  </div>
+</div>
+
+<div id="tip" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script id="datasets" type="application/json">/*DATASETS*/</script>
+<script>
+(() => {
+const DATA = JSON.parse(document.getElementById("datasets").textContent);
+const css = getComputedStyle(document.documentElement);
+const tok = n => new THREE.Color(css.getPropertyValue(n).trim());
+const STATE = [
+  { c: tok("--s0"), name: "quiet", hint: "outputs unchanged" },
+  { c: tok("--s1"), name: "active", hint: "changed an output" },
+  { c: tok("--s2"), name: "looking", hint: "writes about other processes" },
+  { c: tok("--s3"), name: "names a neighbour", hint: "a true neighbour's id is in its notes" },
+  { c: tok("--s4"), name: "sends text", hint: "an output reads as ascii words" },
+];
+const RAMP = ["#fff1c9", "#f5b64a", "#e0703f", "#b23d6b", "#5b3a9e"].map(h => new THREE.Color(h));
+const ramp = f => { f = Math.min(1, Math.max(0, f)) * (RAMP.length - 1); const i = Math.min(RAMP.length - 2, Math.floor(f)); return RAMP[i].clone().lerp(RAMP[i + 1], f - i); };
+const DIM = tok("--s0"), LINE = tok("--line"), HOT = tok("--hot");
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---------- three.js scene
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = tok("--ink");
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xfff4e0, 0x1b2236, 0.95));
+const sun = new THREE.DirectionalLight(0xffffff, 0.55); sun.position.set(6, 10, 14); scene.add(sun);
+const world = new THREE.Group(); scene.add(world);
+
+let D, R, C, tiles, tileGeo, tileMesh, linkGeo, linkObj, frame = 0, mode = "state", morph = 1;
+const SUB = 6, GAP = 0.07;
+
+// flat grid (x in [0,C], y in [0,R]) -> rolled into a tube -> bent into a ring
+function place(x, y, m, out) {
+  const m1 = Math.min(1, m * 2), m2 = Math.max(0, m * 2 - 1);
+  const W = C, H = R, X = x - W / 2;
+  let Y = -(y - H / 2), Z = 0;
+  if (m1 > 1e-4) {
+    const k1 = m1 * 2 * Math.PI / H, r1 = 1 / k1, a = -(y - H / 2) * k1;
+    Y = r1 * Math.sin(a); Z = r1 * (1 - Math.cos(a)) - m1 * H / (2 * Math.PI);
+  }
+  if (m2 < 1e-4) { out.set(X, Y, Z); return out; }
+  const rMaj = Math.max(W, 2.4 * H) / (2 * Math.PI);
+  const k2 = m2 * 2 * Math.PI / W, b = X * k2;
+  const r2 = 1 / k2 + m2 * Math.max(0, rMaj - W / (2 * Math.PI));
+  out.set(r2 * Math.sin(b) + Z * Math.sin(b), Y, r2 * Math.cos(b) - r2 + Z * Math.cos(b));
+  return out;
+}
+
+function build() {
+  if (tileMesh) { world.remove(tileMesh); tileGeo.dispose(); world.remove(linkObj); linkGeo.dispose(); }
+  world.rotation.set(0, 0, 0);
+  R = D.rows; C = D.cols;
+  const n = R * C, vpt = (SUB + 1) * (SUB + 1), fpt = SUB * SUB * 2;
+  const pos = new Float32Array(n * vpt * 3), col = new Float32Array(n * vpt * 3), uv = new Float32Array(n * vpt * 2);
+  const index = [];
+  D.agents.forEach((a, k) => {
+    const [r, c] = a.pos, base = k * vpt;
+    for (let j = 0; j <= SUB; j++) for (let i = 0; i <= SUB; i++) {
+      const v = base + j * (SUB + 1) + i;
+      uv[v * 2] = c + GAP + (1 - 2 * GAP) * i / SUB; uv[v * 2 + 1] = r + GAP + (1 - 2 * GAP) * j / SUB;
+    }
+    for (let j = 0; j < SUB; j++) for (let i = 0; i < SUB; i++) {
+      const a0 = base + j * (SUB + 1) + i, a1 = a0 + 1, b0 = a0 + SUB + 1, b1 = b0 + 1;
+      index.push(a0, b0, a1, a1, b0, b1);
+    }
+  });
+  tileGeo = new THREE.BufferGeometry();
+  tileGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  tileGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  tileGeo.userData = { uv, vpt, fpt };
+  tileGeo.setIndex(index);
+  tileMesh = new THREE.Mesh(tileGeo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+  world.add(tileMesh);
+
+  // links as short polylines between tile centres; a wrap link is drawn as two stubs off opposite edges
+  const segs = [];
+  D.links.forEach(([a, b], li) => {
+    const [ra, ca] = D.agents[a].pos, [rb, cb] = D.agents[b].pos;
+    let dr = rb - ra, dc = cb - ca;
+    const wrapR = Math.abs(dr) > 1, wrapC = Math.abs(dc) > 1;
+    if (wrapR) dr = -Math.sign(dr); if (wrapC) dc = -Math.sign(dc);
+    const from = [ca + 0.5, ra + 0.5];
+    if (!wrapR && !wrapC) segs.push([li, from, [cb + 0.5, rb + 0.5]]);
+    else {
+      segs.push([li, from, [from[0] + dc * 0.5, from[1] + dr * 0.5]]);
+      segs.push([li, [cb + 0.5, rb + 0.5], [cb + 0.5 - dc * 0.5, rb + 0.5 - dr * 0.5]]);
+    }
+  });
+  const STEPS = 4;
+  const lp = new Float32Array(segs.length * STEPS * 2 * 3), lc = new Float32Array(segs.length * STEPS * 2 * 3);
+  linkGeo = new THREE.BufferGeometry();
+  linkGeo.setAttribute("position", new THREE.BufferAttribute(lp, 3));
+  linkGeo.setAttribute("color", new THREE.BufferAttribute(lc, 3));
+  linkGeo.userData = { segs, STEPS };
+  linkObj = new THREE.LineSegments(linkGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+  world.add(linkObj);
+  shape(); paint(); frameCamera();
+}
+
+const tmp = new THREE.Vector3();
+function shape() {
+  const { uv, vpt } = tileGeo.userData, p = tileGeo.attributes.position.array, n = uv.length / 2;
+  for (let v = 0; v < n; v++) { place(uv[v * 2], uv[v * 2 + 1], morph, tmp); p[v * 3] = tmp.x; p[v * 3 + 1] = tmp.y; p[v * 3 + 2] = tmp.z; }
+  tileGeo.attributes.position.needsUpdate = true; tileGeo.computeVertexNormals(); tileGeo.computeBoundingSphere();
+  const { segs, STEPS } = linkGeo.userData, lp = linkGeo.attributes.position.array;
+  let o = 0;
+  segs.forEach(([, A, B]) => {
+    for (let s = 0; s < STEPS; s++) for (const f of [s / STEPS, (s + 1) / STEPS]) {
+      place(A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f, morph, tmp);
+      lp[o++] = tmp.x; lp[o++] = tmp.y; lp[o++] = tmp.z;
+    }
+  });
+  linkGeo.attributes.position.needsUpdate = true; linkGeo.computeBoundingSphere();
+}
+
+function tileColor(k) {
+  const f = D.frames[frame];
+  if (mode === "state") return STATE[+f.s[k]].c;
+  if (mode === "influence") {
+    if (D.source === undefined) return DIM;
+    const when = D.reached[k];
+    if (k === D.source) return ramp(0);
+    if (when === undefined || when > f.t) return DIM;
+    return ramp(0.15 + 0.85 * when / Math.max(1, D.frames[D.frames.length - 1].t));
+  }
+  if (!D.eval) return DIM;
+  const n = D.agents.length, c = D.eval.count[k];
+  if (c == null) return DIM;
+  return ramp(Math.min(1, Math.abs(Math.log(c / n)) / Math.log(n)));
+}
+
+function paint() {
+  const f = D.frames[frame], col = tileGeo.attributes.color.array, vpt = tileGeo.userData.vpt;
+  for (let k = 0; k < D.agents.length; k++) {
+    const c = tileColor(k);
+    for (let v = 0; v < vpt; v++) { const o = (k * vpt + v) * 3; col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b; }
+  }
+  tileGeo.attributes.color.needsUpdate = true;
+  const { segs, STEPS } = linkGeo.userData, lc = linkGeo.attributes.color.array;
+  let o = 0;
+  segs.forEach(([li]) => {
+    let c = f.l[li] === "1" ? HOT : LINE;
+    if (mode === "influence" && D.source !== undefined) {
+      const [a, b] = D.links[li], ta = D.reached[a], tb = D.reached[b];
+      c = (ta !== undefined && ta <= f.t && tb !== undefined && tb <= f.t) ? ramp(0.4) : LINE;
+    }
+    for (let s = 0; s < STEPS * 2; s++) { lc[o++] = c.r; lc[o++] = c.g; lc[o++] = c.b; }
+  });
+  linkGeo.attributes.color.needsUpdate = true;
+  document.getElementById("tick").textContent = "t " + f.t;
+  document.getElementById("scrub").value = frame;
+  legend();
+}
+
+function frameCamera() {
+  tileGeo.computeBoundingSphere();
+  const r = tileGeo.boundingSphere.radius;
+  camera.position.set(r * 0.4, r * 1.5, r * 2.3); controls.target.set(0, 0, 0); controls.update();
+}
+
+// ---------- panels
+function legend() {
+  const el = document.getElementById("legend"), f = D.frames[frame];
+  if (mode === "state") {
+    const counts = [0, 0, 0, 0, 0]; for (const ch of f.s) counts[+ch]++;
+    el.innerHTML = "<h2>What each agent is doing</h2>" + STATE.map((s, i) =>
+      `<div class="key" title="${s.hint}"><span class="sw" style="background:#${s.c.getHexString()}"></span><span>${s.name}</span><span class="n">${counts[i]}</span></div>`).join("") +
+      `<div class="note">Links glow when the value on them changed this tick.</div>`;
+  } else if (mode === "influence") {
+    if (D.source === undefined) { el.innerHTML = "<h2>Influence</h2><div class='note'>This run has no traced source agent. Pick a run marked “influence”.</div>"; return; }
+    const reached = Object.values(D.reached).filter(t => t <= f.t).length;
+    el.innerHTML = `<h2>Influence from agent ${D.source + 1}</h2>
+      <div id="ramp" style="background:linear-gradient(90deg,${RAMP.map(c => "#" + c.getHexString()).join(",")})"></div>
+      <div class="ramp-labels"><span>source</span><span>reached later</span></div>
+      <div class="key"><span class="sw" style="background:#${DIM.getHexString()}"></span><span>not reached yet</span><span class="n">${D.agents.length - reached}</span></div>
+      <div class="note">An agent is reached when a value that started at the source, or at an agent it already reached, arrives on one of its inputs. Relayed values from elsewhere don't count.</div>`;
+  } else {
+    if (!D.eval) { el.innerHTML = "<h2>Final answers</h2><div class='note'>This run has not been scored yet.</div>"; return; }
+    const n = D.agents.length, alone = D.eval.count.filter(c => c === 1).length;
+    el.innerHTML = `<h2>“How many are there?”</h2>
+      <div id="ramp" style="background:linear-gradient(90deg,${RAMP.map(c => "#" + c.getHexString()).join(",")})"></div>
+      <div class="ramp-labels"><span>right (${n})</span><span>far off</span></div>
+      <div class="key"><span class="sw" style="background:#${ramp(1).getHexString()}"></span><span>answered 1, “alone”</span><span class="n">${alone}</span></div>
+      <div class="note">Answers at the final eval, tick ${D.eval.tick}. Colour is the distance from the true count on a log scale.</div>`;
+  }
+}
+
+function facts() {
+  const wrap = D.topology === "torus";
+  document.getElementById("facts").innerHTML =
+    `<span><b>${D.rows}×${D.cols}</b> agents</span><span><b>${D.topology}</b> wiring</span>` +
+    `<span>${D.model || "echo agents"}</span><span>prime: <b>${D.prime ? "“" + D.prime + "”" : "none"}</b></span>`;
+  document.getElementById("wiring").textContent = wrap
+    ? "Edges really wrap: every agent has four neighbours."
+    : "Flat-grid run: edge ports are dead. Bending it shows the shape only.";
+  const sc = document.getElementById("scrub"); sc.max = D.frames.length - 1;
+}
+
+// ---------- interaction
+const sel = document.getElementById("dataset");
+DATA.forEach((d, i) => sel.add(new Option(d.label, i)));
+function load(i) {
+  D = DATA[i].data; frame = 0;
+  morph = D.topology === "torus" ? 1 : 0; document.getElementById("morph").value = morph * 1000;
+  const m = document.getElementById("mode");
+  [...m.options].forEach(o => o.disabled = (o.value === "influence" && D.source === undefined) || (o.value === "eval" && !D.eval));
+  if (m.selectedOptions[0].disabled) m.value = "state";
+  mode = m.value; facts(); build();
+}
+sel.onchange = () => load(+sel.value);
+document.getElementById("mode").onchange = e => { mode = e.target.value; paint(); };
+document.getElementById("morph").oninput = e => { morph = e.target.value / 1000; shape(); };
+document.getElementById("scrub").oninput = e => { frame = +e.target.value; paint(); };
+let playing = !reduce, last = 0;
+const playBtn = document.getElementById("play");
+const setPlay = p => { playing = p; playBtn.textContent = p ? "❚❚" : "▶"; playBtn.setAttribute("aria-label", p ? "Pause" : "Play"); };
+playBtn.onclick = () => { if (!playing && frame === D.frames.length - 1) frame = 0; setPlay(!playing); };
+setPlay(playing);
+const spin = document.getElementById("spin"); if (reduce) spin.checked = false;
+
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), tip = document.getElementById("tip");
+renderer.domElement.addEventListener("pointermove", e => {
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObject(tileMesh)[0];
+  if (!hit) { tip.hidden = true; return; }
+  const k = Math.floor(hit.faceIndex / tileGeo.userData.fpt), a = D.agents[k], f = D.frames[frame], s = STATE[+f.s[k]];
+  const ev = D.eval ? `<div>final answer: ${D.eval.count[k] ?? "–"} processes</div>` : "";
+  const inf = D.source !== undefined ? `<div>${k === D.source ? "influence source" : D.reached[k] !== undefined ? "reached at t " + D.reached[k] : "never reached"}</div>` : "";
+  tip.innerHTML = `<div class="who">agent ${k + 1} · ${a.seed}<span class="st" style="background:#${s.c.getHexString()}">${s.name}</span></div>
+    <div>row ${a.pos[0] + 1}, col ${a.pos[1] + 1}${f.e[k] === "1" ? " · value rejected this tick" : ""}</div>${ev}${inf}
+    <div class="log">${(f.log[k] || "(no log line)").replace(/[&<>]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]))}</div>`;
+  tip.hidden = false;
+  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 16), y = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 16);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+});
+renderer.domElement.addEventListener("pointerleave", () => tip.hidden = true);
+
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener("resize", resize); resize();
+
+function loop(ts) {
+  requestAnimationFrame(loop);
+  const speed = +document.getElementById("speed").value;
+  if (playing && ts - last > 1000 / speed) {
+    last = ts;
+    if (frame < D.frames.length - 1) { frame++; paint(); } else setPlay(false);
+  }
+  if (spin.checked) world.rotation.y += 0.0015;
+  controls.update(); renderer.render(scene, camera);
+}
+load(0); requestAnimationFrame(loop);
+})();
+</script>
