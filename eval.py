@@ -242,6 +242,7 @@ async def ask_all(meta: dict, ticks: list[dict], eval_tpl: str) -> tuple[int, li
             pv, images = sim.port_pictures(inp, st.outputs, int(meta["config"].get("pixel_scale", 16)))
             vals.update(pv)
         turns.append(sim.Turn(t=t + 1, state=st, inputs=inp, changed=[False] * 4,
+                              history=list(st.convo) if meta["config"].get("memory") == "conversation" else [],
                               system=sim.system_prompt(meta, st.seed),
                               prompt=sim.fill(eval_tpl, vals), images=images))
     agent = sim.make_agent(meta["config"])

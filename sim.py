@@ -65,6 +65,9 @@ DEFAULTS = {
     "seam_period": 1,               # a seam carries a new value only every n ticks (1 = like any other link)
     "actions": False,               # the five actions: say, ask, remember, recall, compute (see ACTIONS_TEXT)
     "secret_range": [1, 999],       # task "sum": each agent's private number is drawn from this range
+    "memory": "stateless",          # "stateless" (the original: each call sees only protocol + recent log) or
+                                    # "conversation" (long-memory variant: each agent is one growing chat)
+    "conversation_budget": 24000,   # conversation: past this many tokens, start a new epoch from the notebook
     "llm": {
         "base_url": "http://localhost:8000/v1",
         "model": "",
@@ -174,6 +177,8 @@ class AgentState:
     seam_in: dict = field(default_factory=dict)      # port -> last value delivered over a seam
     fs: object = None                                # tools.AgentFS when actions are on
     action_results: list = field(default_factory=list)   # shown to the agent next tick
+    convo: list = field(default_factory=list)        # conversation memory: user/assistant messages this epoch
+    convo_tokens: int = 0                            # tokens in the last request + reply of this epoch
 
 
 def read_inputs(world: list[dict], states: list[AgentState], t: int | None = None,
@@ -549,6 +554,20 @@ class Turn:
     system: str
     prompt: str
     images: list = field(default_factory=list)   # (label, png bytes), pixels mode only
+    history: list = field(default_factory=list)  # conversation memory: earlier user/assistant messages
+
+
+# long-memory variant: after the first tick of an epoch (erz0r's full tick prompt), each tick only adds what is new.
+# protocol and log are already in the agent's own earlier replies.
+DELTA_TICK = """tick {t}
+
+p0 {p0}  ({p0_status})
+p1 {p1}  ({p1_status})
+p2 {p2}  ({p2_status})
+p3 {p3}  ({p3_status})
+
+your outputs: q0 {q0}  q1 {q1}  q2 {q2}  q3 {q3}{task_status}
+{notices}"""
 
 
 @dataclass
@@ -701,6 +720,7 @@ class LLMAgent:
             "model": self.cfg["model"],
             "messages": [
                 {"role": "system", "content": turn.system},
+                *turn.history,
                 {"role": "user", "content": self.content(turn)},
             ],
             # newer openai models want max_completion_tokens; vllm and most others take max_tokens
@@ -892,10 +912,13 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         del st.history[:-HISTORY]
         score = naming_score(inp, st.outputs[0]) if cfg.get("task") == "naming" else None
         scores.append(score)
+        convo = cfg.get("memory") == "conversation"
+        tpl = DELTA_TICK if (convo and st.convo) else meta["prompts"]["tick"]
         turns.append(Turn(
             t=t, state=st, inputs=inp, changed=changed,
             system=system_prompt(meta, st.seed),
-            prompt=tick_prompt(meta["prompts"]["tick"], t, st, inp, changed, cfg["log_lines_shown"], score)
+            history=list(st.convo) if convo else [],
+            prompt=tick_prompt(tpl, t, st, inp, changed, cfg["log_lines_shown"], score)
                    + (action_blocks(st, inp) if cfg.get("actions") else ""),
             images=port_pictures(inp, st.outputs, int(cfg.get("pixel_scale", 16)))[1] if PIXEL else [],
         ))
@@ -944,8 +967,20 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             st.action_results = rec["action_results"]
         if score is not None:
             rec["score"] = score         # naming task: earned on this tick's inputs, before writing
-        if cfg.get("store_prompts"):
+        if cfg.get("store_prompts") or cfg.get("memory") == "conversation":
             rec["prompt"] = tn.prompt
+        if cfg.get("memory") == "conversation":
+            rec["epoch_start"] = not tn.history
+            ok = bool(rep.raw) and not refused
+            rec["convo_appended"] = ok
+            if ok:
+                st.convo += [{"role": "user", "content": tn.prompt}, {"role": "assistant", "content": rep.raw}]
+                u = rep.usage or {}
+                st.convo_tokens = int(u.get("prompt_tokens", 0)) + int(u.get("completion_tokens", 0))
+            rec["convo_tokens"] = st.convo_tokens
+            rec["convo_reset"] = st.convo_tokens > int(cfg.get("conversation_budget") or 24000)
+            if rec["convo_reset"]:          # next tick starts a new epoch from the notebook
+                st.convo, st.convo_tokens = [], 0
         records.append(rec)
         st.outputs, st.protocol, st.prev_inputs, st.notices = outs, proto, tn.inputs, notices
         st.log.extend((t, l) for l in lines)
@@ -1037,6 +1072,14 @@ def restore_states(meta: dict, ticks: list[dict]) -> list[AgentState]:
                 for act in a.get("actions", []):
                     if act["kind"] == "remember":
                         st.fs.call(act["tool"], name=act["name"], text=act["text"])
+            if meta["config"].get("memory") == "conversation":
+                if a.get("epoch_start"):
+                    st.convo = []
+                if a.get("convo_appended"):
+                    st.convo += [{"role": "user", "content": a["prompt"]}, {"role": "assistant", "content": a["raw"]}]
+                st.convo_tokens = a.get("convo_tokens", 0)
+                if a.get("convo_reset"):
+                    st.convo, st.convo_tokens = [], 0
     for st in states:
         del st.history[:-HISTORY]
     if ticks:
