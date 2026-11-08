@@ -33,6 +33,7 @@ header.hud {
 h1 { font-family: var(--display); font-weight: 700; font-size: 24px; letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
 .facts { color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .facts b { color: var(--paper); font-weight: 500; }
+@media (min-width: 721px) { header.hud { max-width: calc(100vw - 270px); } }
 select, button, input[type=range] { font: inherit; color: var(--paper); }
 select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; max-width: 100%; }
 #legend {
@@ -132,7 +133,7 @@ const STATE = [
 ];
 const RAMP = ["#fff1c9", "#f5b64a", "#e0703f", "#b23d6b", "#5b3a9e"].map(h => new THREE.Color(h));
 const ramp = f => { f = Math.min(1, Math.max(0, f)) * (RAMP.length - 1); const i = Math.min(RAMP.length - 2, Math.floor(f)); return RAMP[i].clone().lerp(RAMP[i + 1], f - i); };
-const DIM = tok("--s0"), LINE = tok("--line"), HOT = tok("--hot");
+const DIM = tok("--s0"), LINE = tok("--line"), HOT = tok("--hot"), SEAM = new THREE.Color("#b5651d");
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---------- three.js scene
@@ -198,7 +199,7 @@ function build() {
 
   // links as short polylines between tile centres; a wrap link is drawn as two stubs off opposite edges
   const segs = [];
-  D.links.forEach(([a, b], li) => {
+  D.links.forEach(([a, b, seam], li) => {
     const [ra, ca] = D.agents[a].pos, [rb, cb] = D.agents[b].pos;
     let dr = rb - ra, dc = cb - ca;
     const wrapR = Math.abs(dr) > 1, wrapC = Math.abs(dc) > 1;
@@ -263,7 +264,7 @@ function paint() {
   const { segs, STEPS } = linkGeo.userData, lc = linkGeo.attributes.color.array;
   let o = 0;
   segs.forEach(([li]) => {
-    let c = f.l[li] === "1" ? HOT : LINE;
+    let c = f.l[li] === "1" ? HOT : (D.links[li][2] ? SEAM : LINE);
     if (mode === "influence" && D.source !== undefined) {
       const [a, b] = D.links[li], ta = D.reached[a], tb = D.reached[b];
       c = (ta !== undefined && ta <= f.t && tb !== undefined && tb <= f.t) ? ramp(0.4) : LINE;
@@ -289,7 +290,8 @@ function legend() {
     const counts = [0, 0, 0, 0, 0]; for (const ch of f.s) counts[+ch]++;
     el.innerHTML = "<h2>What each agent is doing</h2>" + STATE.map((s, i) =>
       `<div class="key" title="${s.hint}"><span class="sw" style="background:#${s.c.getHexString()}"></span><span>${s.name}</span><span class="n">${counts[i]}</span></div>`).join("") +
-      `<div class="note">Links glow when the value on them changed this tick.</div>`;
+      `<div class="note">Links glow when the value on them changed this tick.` +
+      (D.links.some(l => l[2]) ? ` Brown links are seams between arrays: they carry a new value only every ${D.seam_period} ticks.` : "") + `</div>`;
   } else if (mode === "influence") {
     if (D.source === undefined) { el.innerHTML = "<h2>Influence</h2><div class='note'>This run has no traced source agent. Pick a run marked “influence”.</div>"; return; }
     const reached = Object.values(D.reached).filter(t => t <= f.t).length;
@@ -313,7 +315,12 @@ function facts() {
   const wrap = D.topology === "torus";
   document.getElementById("facts").innerHTML =
     `<span><b>${D.rows}×${D.cols}</b> agents</span><span><b>${D.topology}</b> wiring</span>` +
-    `<span>${D.model || "echo agents"}</span><span>prime: <b>${D.prime ? "“" + D.prime + "”" : "none"}</b></span>`;
+    `<span>${D.model || "echo agents"}</span>` +
+    (D.task === "sum"
+      ? `<span>task: <b>agree on the sum of everyone's private number</b> (${D.answer})</span>` +
+        (D.actions ? `<span><b>5 actions</b>: say, ask, remember, recall, compute</span>` : "") +
+        (D.modules ? `<span><b>${(D.rows / D.modules[0]) * (D.cols / D.modules[1])} arrays</b>${D.seam_period > 1 ? `, seams every ${D.seam_period} ticks` : ""}</span>` : "")
+      : `<span>prime: <b>${D.prime ? "“" + D.prime + "”" : "none"}</b></span>`);
   document.getElementById("wiring").textContent = wrap
     ? "Edges really wrap: every agent has four neighbours."
     : "Flat-grid run: edge ports are dead. Bending it shows the shape only.";

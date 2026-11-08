@@ -66,7 +66,7 @@ def build(run: Path, source: int | None = None) -> dict:
                 key = tuple(sorted(((a["id"], i), (l["agent"], l["port"]))))
                 if key not in idx:
                     idx[key] = len(pairs)
-                    pairs.append([key[0][0], key[1][0]])
+                    pairs.append([key[0][0], key[1][0], 1 if l.get("seam") else 0])
     frames, prev = [], None
     reached = {source: 0} if source is not None else {}
     emitted: dict[str, int] = {}          # traced fingerprint -> tick it first appeared
@@ -115,6 +115,9 @@ def build(run: Path, source: int | None = None) -> dict:
     out = {
         "run": run.name, "rows": meta["rows"], "cols": meta["cols"], "topology": meta.get("topology", "grid"),
         "prime": meta["config"].get("prime", ""), "model": meta["config"].get("llm", {}).get("model", ""),
+        "task": meta["config"].get("task") or "", "actions": bool(meta["config"].get("actions")),
+        "modules": meta["config"].get("modules"), "seam_period": meta["config"].get("seam_period") or 1,
+        "answer": meta.get("answer"),
         "agents": [{"seed": a["seed"], "pos": a["pos"]} for a in agents],
         "links": pairs, "frames": frames,
         "protocols": [a["protocol"][:1600] for a in ticks[-1]["agents"]],

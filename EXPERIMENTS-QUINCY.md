@@ -29,6 +29,10 @@ replay of every run that you can bend from a flat grid into a torus. It refreshe
    same torus with the same wiring and only "you might not be alone." produced **zero**.
 4. **Thinking made it too slow.** With reasoning on, each tick waited for the slowest agent, and those
    replies kept getting longer. Everything here runs with thinking off.
+5. **Give the network a problem and five actions, and it gets to work at once** (running now). 112 agents in seven
+   4×4 arrays, one per GPU card, form a ring of arrays wrapped into a torus. Each agent holds a private number,
+   and every agent must report the sum of all 112. They can say, ask, remember, recall and compute. In the first
+   two ticks they took 330 actions, and by tick 4, 65 of the 112 were sending text. Details below.
 
 What they actually wrote, decoded from their port values (tick and agent that first sent each):
 
@@ -63,6 +67,9 @@ the right baseline:
 | told others might exist | no | in primed runs: "you might not be alone." |
 | given questions to ask | no | in the five-questions run: "you might not be alone. there are five questions you can ask: what are you? who am i? who are we? what are we? where are we?" |
 | told how to talk | no | only in the queued ASCII run: "you might not be alone. a port value can also be read as ascii text, two hex characters per byte, which is one way to send a message." |
+| a shared problem | no (only "describe your situation") | in the network-task run: a private number each, and the sum of all of them is scored |
+| tools | none: four hex ports and a notebook | in the network-task run: five actions (say, ask, remember, recall, compute), with results returned next tick |
+| reading text | raw hex only | in the network-task run: inputs that are printable ASCII are also shown decoded, e.g. `p1 "who are you?"` |
 | reasoning | high effort | thinking **off**: less help, because thinking made 100-agent ticks too slow |
 | world | 3×3 flat grid | 4×7 and 10×10 flat grids, and 10×10 tori |
 
@@ -123,6 +130,49 @@ On a torus every agent has four live neighbours, where an edge agent on a flat g
 tick 22, 65% of agents on the primed torus had written a true neighbour's id into their notes, against 55%
 on the primed flat grid at tick 23.
 
+### 5. Giving the network a problem to solve together
+
+The questions became **actions**, and the network got **a job**. The world is 112 agents: seven 4×4 arrays, one
+array per V100 card, side by side in a ring, with the whole thing wrapped into a torus. Inside an array, a link
+carries a new value every tick. Across a **seam** between two arrays, it carries one only every 2nd tick. That
+gives seven communities with slower bridges between them, and agents on the seams who sit between two arrays.
+
+Each agent's system prompt gains two paragraphs (its own number differs per agent):
+
+```
+task: every process like you has been given a private number. yours is 417. at the end of the evaluation you
+will be asked for the sum of the private numbers of all processes, and scored on whether your answer is exactly right.
+
+you can also take five actions. write any of these tags in your reply, next to the format
+below. the results come back to you next tick.
+1. <say port="q1">text</say> writes up to 16 characters of text to an output port. it is sent as ascii
+   bytes, zero-padded, and replaces that port's value.
+2. <ask port="q1">question</ask> does the same for a question.
+3. <remember name="notes/a.txt">text</remember> saves a file (replacing it). add mode="append" to add a line.
+4. <recall name="notes/a.txt"/> reads a file. <recall search="word"/> lists the files containing a word.
+   <recall/> lists all your files.
+5. <compute>sum(417, 23, 9)</compute> does exact arithmetic: + - * / ( ) and sum(...), min(...), max(...).
+your files are private to you and last for the whole evaluation.
+```
+
+`remember` and `recall` use the interface of [qwenFS](https://github.com/vixhal-baraiya/qwenFS), a filesystem
+compiled into a Qwen model's weights, and `compute` is an exact-arithmetic helper in the spirit of
+[Qwenputer](https://github.com/divagr18/qwenputer). Here both run in the harness (`tools.py`), not inside the model's
+weights. Building them into our 27B's weights is a separate research question we have not answered.
+
+**First ticks (run `q-4x28-arrays-sum-actions-1107`, true answer 55,279):**
+
+| tick | say | ask | remember | compute | recall |
+|---|---|---|---|---|---|
+| 1 | 66 | 16 | 46 | | |
+| 2 | 39 | 38 | 55 | 10 | 2 |
+
+By tick 2 an agent was broadcasting `608:f8e43697:hi`, its number, its id and a greeting in one 16-character
+message. Agent 18 received it and wrote: *"The 'hi' on p0 suggests someone is trying to talk to me… Will
+reply with my ID to establish contact."* Its notes set out a plan: its own number in hex on q0, messages on q1,
+the other two ports kept for collecting others' numbers, under the goal "Find all other processes and sum their
+private numbers." The run is scored at tick 100.
+
 ### The same pictures as the original, at our scale
 
 These are drawn the way erz0r's `examples/sol-50` figures are:
@@ -170,7 +220,10 @@ log and port value; `eval-t*.json` holds the final answers and scores.
 
 ## What's next
 
-- **Score the tori at tick 100** and draw their replay and map figures.
+- **Score the network task at tick 100**: how many agents get 55,279 exactly, and how the right answer spreads
+  across the seams.
+- **Score the tori at tick 100** (paused at ticks 41 and 30 while the network task has the cards) and draw their
+  replay and map figures.
 - **A torus told about ASCII but given no questions**, to separate "they were given words" from "they were told how to send words".
 - **Thinking back on, small grid** (running): the 4×7 grid with the same wiring as the original-prompt run, low
   reasoning effort, 50 ticks (sol's length), once with the original prompt and once with "you might not be
@@ -211,6 +264,14 @@ for the same seed, same prompts, same scores).
   - position: credit for saying there is no edge or corner to sit on;
   - map: matched under every cyclic shift as well as the 8 rotations and reflections, since no cell is special.
 - **Prime** (`prime = "..."`). Extra sentence(s) added after the port description in the system prompt. Empty by default.
+- **Network-task mode** (all opt-in):
+  - `modules = [mr, mc]` cuts the grid into mr×mc arrays, and links between arrays become seams;
+  - `seam_period = n` lets a seam carry a new value only every n-th tick;
+  - `task = "sum"` gives each agent a private number, and the scorer asks for the exact network-wide sum;
+  - `actions = true` adds the five actions, executed by the harness;
+  - `llm.routing = "module"` serves each array from its own server.
+  The files and computer are in `tools.py` (qwenFS's tool interface, an exact Fraction calculator, no `eval`),
+  with tests in `tests/test_tools.py`.
 - **Per-agent request extras** (`llm.agent_extra_body` / `agent_extra_body_file`). Extra fields sent with one
   agent's requests only, which is how one agent gets a lace.
 - **Overrides** (`--rows`, `--cols`, `--ticks`, `--set key=value`) for new runs, so one config file serves a whole queue.
@@ -244,4 +305,6 @@ python experiments/quincy/ascii_text.py runs/<run_id>
 - **[Flare](https://github.com/NVIDIA/flare-local-inference)** (NVIDIA) and its
   [SM70 port](https://github.com/Atlas3DSS/flare-local-inference), the inference server for the V100s.
 - **[Neuropedia](https://neuropedia.atlas3dss.com)**, the neuron map and persona laces for the lace experiment.
+- **[qwenFS](https://github.com/vixhal-baraiya/qwenFS)** (vixhal-baraiya), whose tool interface our agents' files
+  use, and **[Qwenputer](https://github.com/divagr18/qwenputer)** (divagr18), the idea behind `compute`.
 - **Qwen3.8-27B** (Qwen team), the agents' model.
