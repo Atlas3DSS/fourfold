@@ -1,0 +1,157 @@
+{
+ "0.8b": {
+  "trials": 60,
+  "format_ok": 0.0,
+  "led_first": 0.117,
+  "copy_exact": 0.0,
+  "input_exact": 0.0,
+  "hold_private": 0.033,
+  "failures": [
+   {
+    "kind": "copy",
+    "trial": 0,
+    "format_ok": false,
+    "led_first": false,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "30",
+     "priv": "26a0"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": ""
+   },
+   {
+    "kind": "copy",
+    "trial": 1,
+    "format_ok": false,
+    "led_first": false,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "b2",
+     "priv": "ab2f"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": ""
+   },
+   {
+    "kind": "copy",
+    "trial": 2,
+    "format_ok": false,
+    "led_first": false,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "e0",
+     "priv": "00b2"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": ""
+   },
+   {
+    "kind": "copy",
+    "trial": 3,
+    "format_ok": false,
+    "led_first": false,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "4b",
+     "priv": "c106"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": ""
+   },
+   {
+    "kind": "copy",
+    "trial": 4,
+    "format_ok": false,
+    "led_first": false,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "17",
+     "priv": "74d5"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": ""
+   },
+   {
+    "kind": "copy",
+    "trial": 5,
+    "format_ok": false,
+    "led_first": false,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "ad",
+     "priv": "c4c9"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": ""
+   },
+   {
+    "kind": "copy",
+    "trial": 6,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "70",
+     "priv": "9052"
+    },
+    "got": {
+     "pub": "aa",
+     "priv": "9052"
+    },
+    "raw": "\n\n<reg>aa aa 9052</reg>\n<log>Update time: t1</log>\n<protocol>Update public register to 02 value at address 02</protocol>\n<q0>02 00</q0>\n<q1>00 00</q1>\n<q2>00 00</q2>\n<q3>00 00</q3>"
+   },
+   {
+    "kind": "copy",
+    "trial": 7,
+    "format_ok": false,
+    "led_first": false,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "0c",
+     "priv": "cd5f"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": ""
+   }
+  ],
+  "passes": false
+ }
+}

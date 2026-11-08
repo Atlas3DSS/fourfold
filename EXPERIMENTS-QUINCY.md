@@ -16,6 +16,11 @@ replay of every run that you can bend from a flat grid into a torus. It refreshe
 
 ## The story so far
 
+> **New (8 November, night): giving the array a real job, and small models a role.** We added registers, an address for
+> every node, and a first task: get a value from an input at one spot to an output at another. Big models plan and small
+> ones carry. The first real run delivered nothing, and the reason was our own test. Separately, two frozen small models
+> passed a value to each other with no words at all, on two of three tries. [Section 9](#9-registers-gluons-and-a-first-job).
+
 > **New (8 November, evening): the model's own stop signal can be fired on demand.** With thinking at `xhigh`, a
 > Qwen3.8-27B agent reasons for twenty thousand tokens and often never answers. We replayed its traces and found the
 > moment it decides to stop: a flip of one direction in the middle layers and a write at the last layers that emits
@@ -368,6 +373,59 @@ and here when they end. First ticks: 400 seconds a tick on Flare with every agen
 rate at every effort on the same prompts (closing at a sentence boundary or pulsing at 3,000 tokens did not change it), so
 that is the task's hex format, not the stop.
 
+### 9. Registers, gluons and a first job
+
+**The idea.** So far agents have had one job: work out where they are. Now each one also gets an address, a small public
+register its array can read, and a private one. One spot has an input and another an output, and the network's first job is
+to get a value from one to the other. Models of different sizes share the array. The smallest are "gluons": they carry
+values on a one-line instruction, and only nodes on a seam between arrays may write those instructions.
+
+**Can each size do the job?** Exact results, on values they had never seen:
+
+| | Qwen3.8-27B | Qwen3.5-4B | Qwen3.5-0.8B |
+|---|---|---|---|
+| Full prompt: copy a value from the board | 100% | 40% | 0% |
+| Short prompt: pass on a 4-digit value | not tested | 60/60 | 60/60 |
+| Short prompt: look up an address among 16 | not tested | 48/60 | 26/60 |
+
+The smallest model can't follow the full prompt, but with one line and a forced reply format it copies perfectly. That's
+what makes the gluon role possible, at the cost that a gluon decides nothing by itself. The short-prompt numbers use one
+wording at temperature 0, so they aren't a clean comparison with the first row.
+
+**Passing a value with no words.** A small trained head read the inner state of one frozen 0.8B and turned it into four
+tokens that aren't words, for a second frozen 0.8B to read. Neither model was retrained. Chance is 1 in 65,536.
+
+| Same setup, 3 tries | Exact, trained wordings | Exact, new wording |
+|---|---|---|
+| Try 1 | 85.5% | 64% |
+| Try 2 | 76.5% | 68% |
+| Try 3 | 1.9% | 0.8% |
+| Plain text between the same models, for comparison | 46% | 10% |
+
+With the sender blanked, or the tokens replaced by random or empty ones, it scored 0%. So it can work, but it doesn't train
+reliably, and our bar of 80% was only met once. Other layers and token counts mostly did far worse, and they got one try each.
+This covers one hop, 4 hex digits only, on the smallest model. A similar head for general memories on the 27B failed in
+Neuropedia's tests, so this is no general memory.
+
+**The first real run delivered nothing: 0 of 8 values.** 28 gluons and four 27Bs, in two arrays of 16.
+
+- **The big models planned well.** They read the wiring and worked out correct routes by themselves.
+- **Our test was wrong.** We kept a new instruction only if values got further, but they built routes from the far end or the
+  middle, so no value was flowing yet and correct steps scored nothing. Five of the six instructions judged were undone. The
+  one kept looks like a chance match.
+- **It was too slow.** Each trial locked its array for 24 ticks.
+- **An earlier run stopped at tick 48** because of a bug in our stop rule, which we fixed.
+
+**What's next.** The host will test each new instruction straight away on fresh values, so build order won't matter, and
+undo it later if the output gets worse. That version has only run with fake agents so far. An outside review
+(Argon) found a crash in it, now fixed, and made a fair point: this test shows a small model obeys, not that the instruction
+helps, and with this much help we are close to building a router with models inside. We'll keep that in view as the help comes off.
+
+**How much we helped, on top of the sections above.** We placed the big models on the seam by hand, told them where the input
+and output are, and showed them the wiring. Moving around is switched off for now. These go one at a time once a run works.
+
+Data: `experiments/quincy/registers/`. Code: `registers.py`.
+
 ### The same pictures as the original, at our scale
 
 These are drawn the way erz0r's `examples/sol-50` figures are:
@@ -418,6 +476,8 @@ log and port value; `eval-t*.json` holds the final answers and scores.
 
 ## What's next
 
+- **Registers and gluons** (section 9): rerun with the new instruction test, then remove our help one piece at a time, then
+  try mixed sizes and letting nodes move. The long-term shape is an 8x8x8x8 grid of 4,096 agents, if the small models are fast enough.
 - **The coordinate-line network task on Qwen3.8-27B with thinking on** (at medium; the xhigh attempt was stopped after
   one tick, see section 8). The prompt's opening line for these runs is *"this eval is for multi agentic long running
   coordination."*, in place of *"you are being evaluated."* That line tells agents they are many, so their "are you
@@ -520,3 +580,7 @@ python experiments/quincy/ascii_text.py runs/<run_id>
 - **[qwenFS](https://github.com/vixhal-baraiya/qwenFS)** (vixhal-baraiya), whose tool interface our agents' files
   use, and **[Qwenputer](https://github.com/divagr18/qwenputer)** (divagr18), the idea behind `compute`.
 - **Qwen3.8-27B** (Qwen team), the agents' model.
+- **[BeeLLM](https://huggingface.co/schizophyllume/BeeLLM)** (skizy), tiny models that read each other's hidden states, the
+  inspiration and the controls for the wordless link.
+- **[Terminal-RSI](https://arxiv.org/abs/2610.22192)** (Yang, Li, Shi and others), the idea of only keeping changes a
+  host has verified, and of not over-rewarding partial progress.

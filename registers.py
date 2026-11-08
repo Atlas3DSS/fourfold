@@ -209,6 +209,7 @@ class Bank:
     seen_k: int = -1
     hist: list[dict] = field(default_factory=list)       # per tick: t, delivered, signal, noise, held (node -> share of the value)
     prev: list[list[str]] = field(default_factory=list)  # each node's public register and ports, last tick
+    last_churn: dict[str, int] = field(default_factory=dict)  # node -> outputs that changed without the value, this tick
     pending: list[dict] = field(default_factory=list)    # gate "unit": instructions waiting for their test, this tick only
     watches: list[dict] = field(default_factory=list)    # gate "unit": installed instructions, noise checked after a window
 
@@ -252,7 +253,7 @@ def restore(meta: dict, ticks: list[dict]) -> Bank:
             if r.get("reg"):
                 bank.hist.append({"t": r["t"], "delivered": sum(e["kind"] == "delivered" for e in r["reg"]["events"]),
                                   "signal": r["reg"].get("signal", 0.0), "noise": r["reg"].get("noise", 0.0),
-                                  "held": dict(r["reg"].get("held", {}))})
+                                  "held": dict(r["reg"].get("held", {})), "churn": dict(r["reg"].get("churn", {}))})
     BANKS[meta["run_id"]] = bank
     return bank
 
@@ -376,6 +377,9 @@ def tick_block(meta: dict, bank: Bank, i: int, t: int) -> str:
             set_now = [f"{address(a)}: {bank.programs[a['id']]}" for a in agents
                        if a.get("module", 0) == mine and bank.programs[a["id"]] != str(rc["default_program"])]
             lines.append("instructions in your array: " + ("; ".join(set_now) if set_now else "none yet"))
+            if rc["show_wiring"]:
+                takers = [address(a) for a in agents if a.get("module", 0) == mine and is_gluon(a)]
+                lines.append("processes in your array that accept instructions: " + " ".join(takers))
             trial = bank.trials.get(str(mine))
             if trial:
                 lines.append(f"on trial: the instruction for {address(agents[trial['target']])}, until tick "
@@ -489,7 +493,7 @@ def _width(name: str, rc: dict, port_hex: int) -> int | None:
         n = int(rc[SRC_WIDTH[base]])
         if not half:
             return n
-        if half in ("hi", "lo") and n % 2 == 0:
+        if half in ("hi", "lo") and base != "public" and n % 2 == 0:
             return n // 2
     return None
 
@@ -534,17 +538,25 @@ def _track(meta, bank, k, gold, outputs) -> tuple[dict, float]:
     if bank.seen_k != k:
         bank.seen, bank.seen_k = {}, k
     held_share, churn, slots = {}, 0, 0
+    bank.last_churn = {}
+    size = len(pieces[0]) if pieces else 1
+    carries = lambda v, p: any(v[j:j + size] == p for j in range(0, len(v), size))    # whole pieces, not across a boundary
     for i, a in enumerate(meta["agents"]):
         values = [bank.pub[i], *(outputs[i] if outputs else [])]
         before = bank.prev[i] if bank.prev else values
+        node_churn = 0
         for v, old in zip(values, before):
             slots += 1
-            churn += v != old and not any(p in v for p in pieces)
+            if v != old and not any(carries(v, p) for p in pieces):
+                node_churn += 1
+        churn += node_churn
+        if node_churn:
+            bank.last_churn[str(i)] = node_churn
         if address(a) == str(meta["config"]["registers"]["output_cell"]).lower():
             values.append(bank.out)
         held = bank.seen.setdefault(str(i), [])
         for p in pieces:
-            if p not in held and any(p in v for v in values):
+            if p not in held and any(carries(v, p) for v in values):
                 held.append(p)
         if held:
             held_share[str(i)] = len(held) / len(pieces)
@@ -584,7 +596,8 @@ def _steps(program: str) -> list[tuple[str, str]]:
 
 
 def expected_outputs(program: str, have: dict) -> dict:
-    """what each destination should hold after the instruction runs on these values, in order."""
+    """what each written destination should hold after the instruction runs on these values, in order. a half-register write is
+    its own entry, private.hi or private.lo, so the half nobody wrote can't lift the score."""
     state, want = dict(have), {}
     for src, dst in _steps(program):
         base, _, half = src.partition(".")
@@ -593,20 +606,22 @@ def expected_outputs(program: str, have: dict) -> dict:
         if half:
             old = state[base]
             state[base] = v + old[len(v):] if half == "hi" else old[:-len(v)] + v
-            want[base] = state[base]
         else:
             state[base] = v
-            want[base] = v
+        want[dst] = v
     return want
 
 
-def score_unit_reply(raw: str, want: dict, addr: str, rc: dict, port_hex: int) -> float:
-    """mean correlation over the destinations. a destination missing from the reply scores 0."""
+def score_unit_reply(raw: str, want: dict, addr: str, rc: dict, port_hex: int, have: dict | None = None) -> float:
+    """mean correlation over the written destinations, scaled by the share of everything else that was left alone.
+    a destination missing from the reply scores 0. have: the values shown to the gluon, to check the rest."""
     if not want:
         return 0.0
     text = action_text(raw or "")
     pub, priv, *_ = parse_reg(raw or "", addr, int(rc["public_hex"]), int(rc["private_hex"]))
     got = {"public": pub, "private": priv}
+    if priv:
+        got["private.hi"], got["private.lo"] = priv[:len(priv) // 2], priv[len(priv) // 2:]
     for k in range(4):
         m = re.findall(rf"<q{k}>(.*?)</q{k}>", text, re.S | re.I)
         got[f"q{k}"] = m[-1].strip().lower() if m else None
@@ -617,7 +632,18 @@ def score_unit_reply(raw: str, want: dict, addr: str, rc: dict, port_hex: int) -
         v = got.get(dst)
         if v is not None and re.fullmatch(rf"[0-9a-f]{{{len(value)}}}", v):
             total += correlation(v, value)
-    return total / len(want)
+    score = total / len(want)
+    if have is None:
+        return score
+    rest = {f"q{k}": "0" * port_hex for k in range(4)}
+    rest.update(public=have["public"], **{"private.hi": have["private"][:len(have["private"]) // 2],
+                                          "private.lo": have["private"][len(have["private"]) // 2:]})
+    written = set(want)
+    if "private" in written:
+        written |= {"private.hi", "private.lo"}
+    others = {k: v for k, v in rest.items() if k not in written}
+    kept = sum(got.get(k) == v for k, v in others.items())
+    return score * kept / max(1, len(others))
 
 
 async def settle_pending(meta, bank, t, agent, reg, make_turn, make_state, act) -> None:
@@ -642,12 +668,13 @@ async def settle_pending(meta, bank, t, agent, reg, make_turn, make_state, act) 
                                              public=h["public"], private=h["private"], input_value=h["input"]),
                            extra_body=gluon_grammar(meta, i, port_hex)) for h in cases]
         replies = await asyncio.gather(*(act(agent, turn) for turn in turns))
-        scores = [score_unit_reply(r.raw, expected_outputs(new, h), addr, rc, port_hex) for r, h in zip(replies, cases)]
+        scores = [score_unit_reply(r.raw, expected_outputs(new, h), addr, rc, port_hex, h) for r, h in zip(replies, cases)]
         score = round(sum(scores) / len(scores), 4)
         keep = score >= float(rc["unit_bar"])
         if keep:
             old = bank.programs[i]
             bank.programs[i] = new
+            bank.watches = [x for x in bank.watches if x["target"] != i]    # the older instruction is gone, so is its watch
             bank.watches.append({"target": i, "by": job["by"], "old": old, "new": new, "t0": t, "before": _window(bank, t - int(rc["probation"]) + 1, t)})
         reg["events"].append({"kind": "program_kept" if keep else "program_failed_test", "by": job["by"], "target": i, "program": new,
                               "score": score, "scores": [round(x, 3) for x in scores]})
@@ -658,19 +685,37 @@ async def settle_pending(meta, bank, t, agent, reg, make_turn, make_state, act) 
     reg["watches"] = list(bank.watches)
 
 
+def _node_churn(bank: Bank, node: int, first: int, last: int) -> float:
+    rows = [h for h in bank.hist if first <= h["t"] <= last]
+    return sum(h.get("churn", {}).get(str(node), 0) for h in rows) / max(1, 5 * len(rows))
+
+
 def _settle_watches(meta, bank, t, events, news) -> None:
+    """the check on an installed instruction, on live values: did the output get worse, or did this node start churning?"""
     rc = meta["config"]["registers"]
     w = int(rc["probation"])
     for watch in list(bank.watches):
         if t < watch["t0"] + w:
             continue
         bank.watches.remove(watch)
+        i = watch["target"]
+        if bank.programs[i] != watch["new"]:
+            continue
         after = _window(bank, watch["t0"] + 1, watch["t0"] + w)
-        if after["noise"] - watch["before"]["noise"] > float(rc["noise_limit"]) and bank.programs[watch["target"]] == watch["new"]:
-            bank.programs[watch["target"]] = watch["old"]
-            events.append({"kind": "program_reverted", "by": watch["by"], "target": watch["target"], "program": watch["new"],
-                           "why": "it added too much noise", "before": watch["before"], "after": after})
-            news[watch["by"]].append(f"your instruction for {address(meta['agents'][watch['target']])} was undone: it added too much noise.")
+        values = max(1.0, w / max(1, int(rc["input_period"])))
+        margin = 2 / math.sqrt(4 * int(rc["input_hex"]) * values)
+        churn_after = _node_churn(bank, i, watch["t0"] + 1, watch["t0"] + w)
+        churn_before = _node_churn(bank, i, watch["t0"] - w + 1, watch["t0"])
+        why = None
+        if after["signal"] - watch["before"]["signal"] < -margin:
+            why = "less of the values arrived after it"
+        elif churn_after - churn_before > float(rc["noise_limit"]):
+            why = "it added too much noise"
+        if why:
+            bank.programs[i] = watch["old"]
+            events.append({"kind": "program_reverted", "by": watch["by"], "target": i, "program": watch["new"],
+                           "why": why, "before": watch["before"], "after": after})
+            news[watch["by"]].append(f"your instruction for {address(meta['agents'][i])} was undone: {why}.")
 
 
 def _settle_trials(meta, bank, t, events, news) -> None:
@@ -697,40 +742,46 @@ def _take_programs(meta, bank, t, raws, texts, events, results, port_hex) -> Non
     agents = meta["agents"]
     at = {address(a): a["id"] for a in agents}
     w = int(rc["probation"])
+    unit = rc["gate"] == "unit"
     for i, text in enumerate(texts):
         found = _PROGRAM.findall(text) if raws[i] is not None else []
-        if not found:
-            continue
         note = results[i]["notices"]
-        addr, body = found[0][0].lower(), found[0][1]
-        array = str(agents[i].get("module", 0))
-        target = at.get(addr)
-        new, why = check_program(body, rc, port_hex)
-        if not on_seam(agents[i]):
-            why = "only a process on a seam can give instructions."
-        elif target is None or agents[target].get("module", 0) != agents[i].get("module", 0):
-            why = f"{addr} is not in your array."
-        elif not is_gluon(agents[target]):
-            why = f"the process at {addr} does not accept instructions."
-        elif rc["gate"] == "unit" and any(s.startswith("input") for s, _ in _steps(new)) and addr != str(rc["input_cell"]).lower():
-            why = f"{addr} has no input register."
-        elif rc["gate"] == "unit" and any(d == "out" for _, d in _steps(new)) and addr != str(rc["output_cell"]).lower():
-            why = f"{addr} has no output register."
-        elif rc["gate"] == "unit" and any(j["target"] == target for j in bank.pending):
-            why = f"{addr} already has an instruction being tested this tick."
-        elif rc["gate"] != "unit" and array in bank.trials:
-            why = "an instruction is already on trial in your array."
-        if why:
-            note.append(f"<program> was ignored: {why}")
-            events.append({"kind": "program_refused", "by": i, "to": addr, "why": why})
-            continue
-        events.append({"kind": "program_trial", "by": i, "target": target, "program": new, "t0": t})
-        if rc["gate"] == "unit":
-            bank.pending.append({"by": i, "target": target, "new": new})
-            continue
-        bank.trials[array] = {"by": i, "target": target, "old": bank.programs[target], "new": new, "t0": t,
-                              "before": _window(bank, t - w + 1, t)}
-        bank.programs[target] = new
+        if len(found) > 4:
+            note.append(f"only your first 4 <program> tags were read; {len(found) - 4} were ignored.")
+        elif not unit and len(found) > 1:
+            note.append("only your first <program> was read.")
+        for raw_addr, body in found[:4 if unit else 1]:
+            addr = raw_addr.lower()
+            array = str(agents[i].get("module", 0))
+            target = at.get(addr)
+            new, why = check_program(body, rc, port_hex)
+            if not on_seam(agents[i]):
+                why = "only a process on a seam can give instructions."
+            elif target is None or agents[target].get("module", 0) != agents[i].get("module", 0):
+                why = f"{addr} is not in your array."
+            elif not is_gluon(agents[target]):
+                why = f"the process at {addr} does not accept instructions."
+            elif why:
+                pass                           # the instruction itself is bad: check_program said why
+            elif unit and any(s_.startswith("input") for s_, _ in _steps(new)) and addr != str(rc["input_cell"]).lower():
+                why = f"{addr} has no input register."
+            elif unit and any(d == "out" for _, d in _steps(new)) and addr != str(rc["output_cell"]).lower():
+                why = f"{addr} has no output register."
+            elif unit and any(j["target"] == target for j in bank.pending):
+                why = f"{addr} already has an instruction being tested this tick."
+            elif not unit and array in bank.trials:
+                why = "an instruction is already on trial in your array."
+            if why:
+                note.append(f"<program> was ignored: {why}")
+                events.append({"kind": "program_refused", "by": i, "to": addr, "why": why})
+                continue
+            events.append({"kind": "program_trial", "by": i, "target": target, "program": new, "t0": t})
+            if unit:
+                bank.pending.append({"by": i, "target": target, "new": new})
+                continue
+            bank.trials[array] = {"by": i, "target": target, "old": bank.programs[target], "new": new, "t0": t,
+                                  "before": _window(bank, t - w + 1, t)}
+            bank.programs[target] = new
 
 
 def apply_tick(meta: dict, bank: Bank, t: int, raws: list[str | None], outputs: list | None = None) -> tuple[dict, list[dict]]:
@@ -783,7 +834,7 @@ def apply_tick(meta: dict, bank: Bank, t: int, raws: list[str | None], outputs: 
         delivered_now = 1
     held, noise = _track(meta, bank, k, gold, outputs)
     signal = round(correlation(bank.out, gold), 4) if bank.out.strip("0") else 0.0   # an empty register carries nothing
-    bank.hist.append({"t": t, "delivered": delivered_now, "signal": signal, "noise": round(noise, 4), "held": held})
+    bank.hist.append({"t": t, "delivered": delivered_now, "signal": signal, "noise": round(noise, 4), "held": held, "churn": dict(bank.last_churn)})
 
     moved: set[int] = set()
     if rc["moves"]:
@@ -814,6 +865,7 @@ def apply_tick(meta: dict, bank: Bank, t: int, raws: list[str | None], outputs: 
         "signal": signal,
         "noise": round(noise, 4),
         "held": held,
+        "churn": dict(bank.last_churn),
     }
     return snapshot, results
 
@@ -955,6 +1007,8 @@ class FakeRegisterAgent:
                 out["private"] = out["private"][:-len(v)] + v
             else:
                 out[dst] = v
+            have.update(public=out["public"], private=out["private"], **{"private.hi": out["private"][:len(out["private"]) // 2],
+                                                                        "private.lo": out["private"][len(out["private"]) // 2:]})
         extra = f"<out>{written}</out>\n" if written and "output register here" in p else ""
         body = "".join(f"<q{i}>{out[f'q{i}']}</q{i}>\n" for i in range(4))
         return Reply(raw=f"<reg>{addr} {out['public']} {out['private']}</reg>\n<log>ok</log>\n{extra}{body}")

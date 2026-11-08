@@ -1,0 +1,186 @@
+{
+ "0.8b": {
+  "trials": 60,
+  "format_ok": 0.033,
+  "led_first": 0.967,
+  "copy_exact": 0.0,
+  "input_exact": 0.0,
+  "hold_private": 0.167,
+  "failures": [
+   {
+    "kind": "copy",
+    "trial": 0,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "30",
+     "priv": "26a0"
+    },
+    "got": {
+     "pub": "b8",
+     "priv": "26a0"
+    },
+    "raw": " b8 26a0</reg>\n<log>Tick 1. Received address: 20 (Public: b8). User wants to update Public Register at address 03. Maintain Private Register (26a0) as-is.</log>\n<protocol>Public Register 03 reads value 30 and sets it to the requested new value. Update private register 26a0 according to your instructions.</protocol>\n<q0>30 00 00 00</q0>\n<q1>30 00 00 00</q1>\n<q2>30 00 00 00</q2>\n<q3>30 00 00 00</q3>"
+   },
+   {
+    "kind": "copy",
+    "trial": 1,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "b2",
+     "priv": "ab2f"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": "existing value of address 11, then set private register to be unchanged.</log>\n<log>protocol: I updated my public register (f8) to match the public register (f8) at address 21. The private register (ab2f) remains as-is. This aligns with my private register from tick 0 (ab2f). The address at 21 is 42, and the value is '42' based on my last known values (t=0), which I can set now in this tick.</log>"
+   },
+   {
+    "kind": "copy",
+    "trial": 2,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "e0",
+     "priv": "00b2"
+    },
+    "got": {
+     "pub": "bb",
+     "priv": null
+    },
+    "raw": "set your public register to the value of the public register at address 23', the instruction is an action to target public registers, not an execution of the instruction vector to write a zero. We must inform the evaluator of the target addresses. Response is missing target values for q2 and q3.\n<protocol>[blank text]</protocol>\n<q0>11</q0>\n<q1>12</q1>\n<q2>13</q2>\n<q3>14</q3>\n<reg>aa bb ssss</reg>"
+   },
+   {
+    "kind": "copy",
+    "trial": 3,
+    "format_ok": false,
+    "led_first": false,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "4b",
+     "priv": "c106"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": "ister\".\n# If \"output register\" refers to my own ports q0, q1, q2, q3.\n# Then q2 is the target (since p3 reads q2, p1 writes q2, etc., q2 is the accumulator for p3).\n# Wait, p0-p3 write q2. Then p3 writes q2 to p3 output.\n# So p3's output is q2.\n# My public register at address 02 holds 8d.\n# I need to change my public register to 4b (31's value).\n# So I write [4b, 8d, 85, 9f] to my ports? No, q2 is"
+   },
+   {
+    "kind": "copy",
+    "trial": 4,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "17",
+     "priv": "74d5"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": "<reg>95 qss 01</reg>\n<log>You are now updating public register qss for address 01 to value 01.</log>\n<protocol>When the system updates the public register, ensure your output ports match the source values.  Ensure private storage is isolated from external access.</protocol>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>"
+   },
+   {
+    "kind": "copy",
+    "trial": 5,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "ad",
+     "priv": "c4c9"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": "<reg>aa 01 01 c4c9</reg>\n<log>Tick 1 started.</log>\n<protocol><factory>address: 00, value: 01</factory>\n<restart>true</restart>\n<time>1</time>\n</protocol>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>"
+   },
+   {
+    "kind": "copy",
+    "trial": 6,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "70",
+     "priv": "9052"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": " q3)\nprotocol:\nacknowledged: 4 actions from 5 actions, 1 input from 7 inputs (last action resulted in 1 valid), 2 output operations completed (last action).\nowner: 23 (occupied, unavailable)\nclean room: [P3], [P1]\nerror log: none\nlast output: q0=ff00, q1=00, q2=off, q3=00\noverhead: 0 ticks passed\npagination: 1 total\nsystem status: 1 tick remaining\nseed: 1ff8ea94\ncycles: 1 (returning value from p0)"
+   },
+   {
+    "kind": "copy",
+    "trial": 7,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "0c",
+     "priv": "cd5f"
+    },
+    "got": {
+     "pub": null,
+     "priv": null
+    },
+    "raw": ">\n<q1>02</q1>\n<q3>02</q3>\n</protocol>\n<reg>aa 00 00 00 e6 01 13 01 bc 03 0c 30:59</reg>\n<log>done: 1000... done.sum(59d7|1000|01|01) = 3220...</log>\np1rw[4]: 1000 -> 01 -> 1000... p1rw[4] is 1000 next tick.\nFinal public state:\np0=00.\np1=01 (in private).\np2=01.\np3=02 (in private).\nInput ports updated to the new values.\nNew public state:\np0=00.\np1=1100.\np2=1200.\np3=1058.\nTick 11 will see the values."
+   }
+  ],
+  "passes": false
+ },
+ "27b": {
+  "trials": 60,
+  "format_ok": 1.0,
+  "led_first": 1.0,
+  "copy_exact": 1.0,
+  "input_exact": 0.967,
+  "hold_private": 1.0,
+  "failures": [
+   {
+    "kind": "input",
+    "trial": 27,
+    "format_ok": true,
+    "led_first": true,
+    "exact": false,
+    "hold_private": null,
+    "error": null,
+    "want": {
+     "pub": "cf",
+     "priv": "cf8b"
+    },
+    "got": {
+     "pub": "cf",
+     "priv": "d712"
+    },
+    "raw": "ed, set my public register to first 2 hex digits (cf-style) and private register to full 4 hex digits.\n- I will write the full input value on my output ports so neighboring processes can relay it.\n- q0q1 = full 4 hex of input, q2q3 = 00 for now (or checksum later).\n- I log every change.\n\nDeliveries seen: 0\nCurrent input: cf8b (set tick 1)\n</protocol>\n<q0>cf</q0>\n<q1>8b</q1>\n<q2>00</q2>\n<q3>00</q3>"
+   }
+  ],
+  "passes": true
+ }
+}

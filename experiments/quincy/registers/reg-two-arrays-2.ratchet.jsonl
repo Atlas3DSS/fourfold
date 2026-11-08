@@ -1,0 +1,2 @@
+{"tick": 48, "window": 48, "keep": true, "talkers": 0, "new_messages": 0, "named_start": 0.0, "named_end": 0.0, "talk": false, "discovery": false, "task": false, "delivered_gain": 0, "programs_kept": 1, "public_changers": 0, "public_values": 4, "registers": true}
+{"tick": 96, "window": 48, "keep": false, "talkers": 0, "new_messages": 0, "named_start": 0.0, "named_end": 0.0, "talk": false, "discovery": false, "task": false, "delivered_gain": 0, "programs_kept": 0, "public_changers": 0, "public_values": 4, "registers": false}

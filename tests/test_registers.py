@@ -724,7 +724,8 @@ class UnitGate(Base):
         rc = two_arrays(gate="unit")["registers"]
         have = {"p0": "1111", "p1": "2222", "public": "ab", "private": "cdef", "input": "7a1f"}
         self.assertEqual(registers.expected_outputs("copy input to q1", have), {"q1": "7a1f"})
-        self.assertEqual(registers.expected_outputs("copy input.hi to public; copy input.lo to private.hi", have), {"public": "7a", "private": "1fef"})
+        self.assertEqual(registers.expected_outputs("copy input.hi to public; copy input.lo to private.hi", have), {"public": "7a", "private.hi": "1f"})
+        self.assertEqual(registers.expected_outputs("copy p0 to private; copy private to q1", have), {"private": "1111", "q1": "1111"})
         good = "<reg>00 ab cdef</reg>\n<log>ok</log>\n<q0>0000</q0>\n<q1>7a1f</q1>\n<q2>0000</q2>\n<q3>0000</q3>\n"
         self.assertEqual(registers.score_unit_reply(good, {"q1": "7a1f"}, "00", rc, 4), 1.0)
         self.assertEqual(registers.score_unit_reply(good.replace("7a1f", "85e0"), {"q1": "7a1f"}, "00", rc, 4), -1.0)
@@ -732,19 +733,72 @@ class UnitGate(Base):
         half = registers.score_unit_reply(good, {"q1": "7a1f", "q0": "1111"}, "00", rc, 4)
         self.assertLess(half, 0.8)                                             # one of two destinations right does not pass
 
-    def test_noise_undoes_an_installed_instruction(self):
+    def test_a_malformed_program_is_refused_not_a_crash(self):
+        _, meta, at = self.build("bad-syntax")
+        bank = registers.bank_for(meta)
+        for bad in ("steal p0", "copy input to", "copy p9 to q0", ""):
+            raws = ["" for _ in range(32)]
+            raws[at["13"]["id"]] = f'<program to="02">{bad}</program>'
+            snap, res = registers.apply_tick(meta, bank, 1, raws, [["0000"] * 4 for _ in range(32)])
+            self.assertEqual([e["kind"] for e in snap["events"]], ["program_refused"], bad)
+            self.assertTrue(any("<program> was ignored" in n for n in res[at["13"]["id"]]["notices"]))
+
+    def test_several_programs_in_one_reply_are_all_read(self):
+        _, meta, at = self.build("several")
+        bank = registers.bank_for(meta)
+        raws = ["" for _ in range(32)]
+        raws[at["13"]["id"]] = "".join(f'<program to="{c}">copy p0 to q1</program>' for c in ("01", "02", "03"))
+        registers.apply_tick(meta, bank, 1, raws, [["0000"] * 4 for _ in range(32)])
+        self.assertEqual(len(bank.pending), 3)
+
+    def test_clobbering_other_outputs_fails_and_half_writes_score_only_their_half(self):
+        rc = two_arrays(gate="unit")["registers"]
+        have = {"p0": "7a1f", "p1": "2222", "p2": "3333", "p3": "4444", "public": "ab", "private": "cdef", "input": "1234"}
+        want = registers.expected_outputs("copy p0 to q1", have)
+        clean = "<reg>00 ab cdef</reg>\n<log>ok</log>\n<q0>0000</q0>\n<q1>7a1f</q1>\n<q2>0000</q2>\n<q3>0000</q3>\n"
+        self.assertEqual(registers.score_unit_reply(clean, want, "00", rc, 4, have), 1.0)
+        messy = clean.replace("<q0>0000", "<q0>9999").replace("<q2>0000", "<q2>8888").replace("ab cdef", "01 0000")
+        self.assertLess(registers.score_unit_reply(messy, want, "00", rc, 4, have), 0.8)
+        half = registers.expected_outputs("copy input.hi to private.hi", have)
+        wrong = clean.replace("ab cdef", "ab eeef")                                # 'ee' for '12', low half untouched
+        self.assertLess(registers.score_unit_reply(wrong, half, "00", rc, 4, have), 0.5)
+
+    def _watch(self, meta, bank, i, by, before_signal=0.0):
+        bank.programs[i] = "copy p0 to q0"
+        bank.watches.append({"target": i, "by": by, "old": "keep everything as it is.", "new": "copy p0 to q0", "t0": 1,
+                             "before": {"signal": before_signal, "deliveries": 0, "reach": 0, "noise": 0.0}})
+
+    def test_one_churning_node_is_undone(self):
         _, meta, at = self.build("noise-undo", probation=4)
         bank = registers.bank_for(meta)
         i = at["02"]["id"]
-        bank.programs[i] = "copy p0 to q0"
-        bank.watches.append({"target": i, "by": at["13"]["id"], "old": "keep everything as it is.", "new": "copy p0 to q0", "t0": 1,
-                             "before": {"signal": 0, "deliveries": 0, "reach": 0, "noise": 0.0}})
+        self._watch(meta, bank, i, at["13"]["id"])
         rng = random.Random(1)
         for t in range(2, 6):
-            outs = [[f"{rng.getrandbits(16):04x}" for _ in range(4)] for _ in range(32)]
+            outs = [["0000"] * 4 for _ in range(32)]
+            outs[i] = [f"{rng.getrandbits(16):04x}" for _ in range(4)]
             snap, _ = registers.apply_tick(meta, bank, t, ["" for _ in range(32)], outs)
         self.assertEqual(bank.programs[i], "keep everything as it is.")
-        self.assertIn("program_reverted", [e["kind"] for e in snap["events"]])
+        self.assertEqual([e["why"] for e in snap["events"] if e["kind"] == "program_reverted"], ["it added too much noise"])
+
+    def test_an_instruction_that_breaks_delivery_is_undone(self):
+        _, meta, at = self.build("break", probation=4, input_period=4)
+        bank = registers.bank_for(meta)
+        i = at["02"]["id"]
+        self._watch(meta, bank, i, at["13"]["id"], before_signal=1.0)     # the output was right before; nothing arrives after
+        for t in range(2, 6):
+            snap, _ = registers.apply_tick(meta, bank, t, ["" for _ in range(32)], [["0000"] * 4 for _ in range(32)])
+        self.assertEqual(bank.programs[i], "keep everything as it is.")
+        self.assertEqual([e["why"] for e in snap["events"] if e["kind"] == "program_reverted"], ["less of the values arrived after it"])
+
+    def test_a_quiet_good_instruction_stays(self):
+        _, meta, at = self.build("stays", probation=4)
+        bank = registers.bank_for(meta)
+        i = at["02"]["id"]
+        self._watch(meta, bank, i, at["13"]["id"])
+        for t in range(2, 6):
+            registers.apply_tick(meta, bank, t, ["" for _ in range(32)], [["0000"] * 4 for _ in range(32)])
+        self.assertEqual(bank.programs[i], "copy p0 to q0")
 
     def test_resume_with_the_unit_gate_matches_a_straight_run(self):
         def go(rid, stops):

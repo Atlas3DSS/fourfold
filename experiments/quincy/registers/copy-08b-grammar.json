@@ -1,0 +1,157 @@
+{
+ "0.8b": {
+  "trials": 60,
+  "format_ok": 0.133,
+  "led_first": 1.0,
+  "copy_exact": 0.0,
+  "input_exact": 0.0,
+  "hold_private": 0.3,
+  "failures": [
+   {
+    "kind": "copy",
+    "trial": 0,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "30",
+     "priv": "26a0"
+    },
+    "got": {
+     "pub": "bb",
+     "priv": "0000"
+    },
+    "raw": "<reg>b8 bb 0000</reg>\n<log>system instructions received</log>\n<q0>31</q0>\n<q1>32</q1>\n<q2>23</q2>\n<q3>32</q3>\n"
+   },
+   {
+    "kind": "copy",
+    "trial": 1,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "b2",
+     "priv": "ab2f"
+    },
+    "got": {
+     "pub": "f8",
+     "priv": "2f00"
+    },
+    "raw": "<reg>aa f8 2f00</reg>\n<log>tick received for address 11</log>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>\n"
+   },
+   {
+    "kind": "copy",
+    "trial": 2,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "e0",
+     "priv": "00b2"
+    },
+    "got": {
+     "pub": "21",
+     "priv": "00b2"
+    },
+    "raw": "<reg>aa 21 00b2</reg>\n<log>tick 1</log>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>\n"
+   },
+   {
+    "kind": "copy",
+    "trial": 3,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "4b",
+     "priv": "c106"
+    },
+    "got": {
+     "pub": "02",
+     "priv": "dd8d"
+    },
+    "raw": "<reg>aa 02 dd8d</reg>\n<log>tick 1 start</log>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>\n"
+   },
+   {
+    "kind": "copy",
+    "trial": 4,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "17",
+     "priv": "74d5"
+    },
+    "got": {
+     "pub": "74",
+     "priv": "d5f5"
+    },
+    "raw": "<reg>aa 74 d5f5</reg>\n<log>current state of registers shows no chat</log>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>\n"
+   },
+   {
+    "kind": "copy",
+    "trial": 5,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "ad",
+     "priv": "c4c9"
+    },
+    "got": {
+     "pub": "9b",
+     "priv": "c4c9"
+    },
+    "raw": "<reg>aa 9b c4c9</reg>\n<log>tick 1 complete</log>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>\n"
+   },
+   {
+    "kind": "copy",
+    "trial": 6,
+    "format_ok": true,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "70",
+     "priv": "9052"
+    },
+    "got": {
+     "pub": "90",
+     "priv": "5290"
+    },
+    "raw": "<reg>23 90 5290</reg>\n<log>tick 1 completed</log>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>\n"
+   },
+   {
+    "kind": "copy",
+    "trial": 7,
+    "format_ok": true,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "0c",
+     "priv": "cd5f"
+    },
+    "got": {
+     "pub": "59",
+     "priv": "cd5f"
+    },
+    "raw": "<reg>30 59 cd5f</reg>\n<log>tick 1 completed</log>\n<q0>20</q0>\n<q1>30</q1>\n<q2>59</q2>\n<q3>cd</q3>\n"
+   }
+  ],
+  "passes": false
+ }
+}

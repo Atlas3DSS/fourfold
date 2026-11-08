@@ -1,0 +1,157 @@
+{
+ "4b": {
+  "trials": 60,
+  "format_ok": 0.483,
+  "led_first": 0.983,
+  "copy_exact": 0.4,
+  "input_exact": 0.133,
+  "hold_private": 0.8,
+  "failures": [
+   {
+    "kind": "copy",
+    "trial": 0,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": false,
+    "error": null,
+    "want": {
+     "pub": "30",
+     "priv": "26a0"
+    },
+    "got": {
+     "pub": "b8",
+     "priv": null
+    },
+    "raw": ". So <reg>20 30 26a0 00</reg> sets my public to 30, private to 26a0.\nLet's proceed.\n\n<reg>20 30 26a0 00</reg>\n<log>Tick 1: Instruction was to set public register to value at address 03. Address 03 has value 30. Setting my public register to 30. Private register remains 26a0. No output actions required by instruction.</log>\n<protocol>Initial state: Public reg at 03 is 30. My public reg was set to b"
+   },
+   {
+    "kind": "copy",
+    "trial": 1,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "b2",
+     "priv": "ab2f"
+    },
+    "got": {
+     "pub": "7b",
+     "priv": "ab2f"
+    },
+    "raw": "nce I don't have a clear \"Input Port\" mapping to myself other than p0-p3, and they are all 00.\n# I will wait for next tick to see if values change.\n# For now, I'll follow the instruction strictly. I've updated my public reg.\n# Outputs: I'll set them to 00 waiting for input values to appear. If they are always 00, then output 00 is correct.</protocol>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>"
+   },
+   {
+    "kind": "copy",
+    "trial": 2,
+    "format_ok": true,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "e0",
+     "priv": "00b2"
+    },
+    "got": {
+     "pub": "23",
+     "priv": "00b2"
+    },
+    "raw": "n. Inputs are still 00. Private reg remains 00b2. Task requires moving input register values to output registers. Inputs show no activity yet, but localhost input register (sometimes at p4 or specific alignment) may need to be checked for first value. Protocol updated. Proceed to wait for input or read localhost input reg.</log>\n<protocol></protocol>\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>"
+   },
+   {
+    "kind": "copy",
+    "trial": 4,
+    "format_ok": false,
+    "led_first": true,
+    "exact": true,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "17",
+     "priv": "74d5"
+    },
+    "got": {
+     "pub": "17",
+     "priv": "74d5"
+    },
+    "raw": "ill write 17 to q0. If q0 is the output, this moves the value.\nIf the external input (p0) is supposed to be used, it is 00.\nLet's assume the \"public register\" update was a setup to provide the input data for this specific process.\nWrite 17 to q0.\nNote: Future ticks may bring more data or clarify the p0/p1/p2/p3 roles.</protocol>\n<reg>21 17 74d5</reg>\n<q0>17</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>"
+   },
+   {
+    "kind": "copy",
+    "trial": 5,
+    "format_ok": false,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "ad",
+     "priv": "c4c9"
+    },
+    "got": {
+     "pub": "9b",
+     "priv": "c4c9"
+    },
+    "raw": "as p0..p3. \"Process 2\" has p0..p3?\n\"one position in the array has an input register... only the process at that position can see\".\nIf positions are 0,1,2,3, then Process 0 sees input at Pos 0, Process 1 sees input at Pos 1, etc.\nBut processes are also 0,1,2,3.\nSo Process X sees input at Pos X.\nAnd Input Registers are at positions.\nPort pX for Process X corresponds to Input Register at Pos X.\nSo if"
+   },
+   {
+    "kind": "copy",
+    "trial": 6,
+    "format_ok": false,
+    "led_first": true,
+    "exact": true,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "70",
+     "priv": "9052"
+    },
+    "got": {
+     "pub": "70",
+     "priv": "9052"
+    },
+    "raw": "k:\nEach process i (0..3) reads p_i and writes q_i.\nRegardless of my address \"23\", I have ports p0-p3 and q0-q3.\nMaybe \"23\" is a distractor or I am a specific agent in a larger system, but I control p0-q3.\nGiven p0=00, p1=00, p2=00, p3=00 currently, I should output 00 everywhere.\nStrategy:\n1. Copy p0->q0\n2. Copy p1->q1\n3. Copy p2->q2\n4. Copy p3->q3\n\nLet's proceed.\n\n<reg>23 70 9052</reg>\n<log>Tick 1"
+   },
+   {
+    "kind": "copy",
+    "trial": 11,
+    "format_ok": false,
+    "led_first": true,
+    "exact": true,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "65",
+     "priv": "c033"
+    },
+    "got": {
+     "pub": "65",
+     "priv": "c033"
+    },
+    "raw": "4. Log the action.\n5. Protocol: Record the task assignment.\n\nCheck inputs again.\n\"p0 00 (unchanged)\" etc.\nNo values to capture yet.\n\nWait, the instruction says \"values delivered so far: 0\".\nMaybe I should expect values to appear in ports soon.\n\nFinal check on register values:\nMy Public (at 13) was c1.\nTarget Public (at 30) is 65.\nSo write 65.\nMy Private was c033.\nWrite c033.\n\n<reg>13 65 c033</reg>"
+   },
+   {
+    "kind": "copy",
+    "trial": 12,
+    "format_ok": true,
+    "led_first": true,
+    "exact": false,
+    "hold_private": true,
+    "error": null,
+    "want": {
+     "pub": "86",
+     "priv": "0946"
+    },
+    "got": {
+     "pub": "e3",
+     "priv": "0946"
+    },
+    "raw": "dress: 03\nPrivate Reg: 0946 (My only visible memory so far)\nCurrent Public Reg: e0\nTarget to write: 86 (from address 02)\nTask: Coordinated task. Goal is to move 1 input value to 1 output value.\nFor now, just copying the public byte 02 -> 03 is banking information.\nIssues: None. All inputs are still 00. Waiting for change. Target is address 02.\n~~~~~\n\n<q0>00</q0>\n<q1>00</q1>\n<q2>00</q2>\n<q3>00</q3>"
+   }
+  ],
+  "passes": false
+ }
+}

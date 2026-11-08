@@ -1,0 +1,656 @@
+{
+ "args": {
+  "model": "Qwen3.5-0.8B",
+  "out": "runs/08b-L12-m4",
+  "layer": 12,
+  "m": 4,
+  "steps": 6000,
+  "batch": 16,
+  "lr": 0.001,
+  "seed": 1,
+  "dtype": "float32",
+  "every": 500,
+  "final_n": 512,
+  "gpu_gib": 10.0
+ },
+ "loss": 1.0040598535870737,
+ "minutes": 85.5,
+ "forms": {
+  "trained_0": {
+   "on": {
+    "exact": 0.0467,
+    "digit": 0.5623,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "bad6"
+     ],
+     [
+      "dade",
+      "dbbf"
+     ],
+     [
+      "fbce",
+      "fbdf"
+     ],
+     [
+      "cad6",
+      "cdf4"
+     ],
+     [
+      "ffcb",
+      "ffdb"
+     ],
+     [
+      "dac9",
+      "daf9"
+     ]
+    ]
+   },
+   "text": {
+    "exact": 0.1206,
+    "digit": 0.1668,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "0x1234567"
+     ],
+     [
+      "dade",
+      "00000000"
+     ],
+     [
+      "fbce",
+      "0x33"
+     ],
+     [
+      "cad6",
+      "0x1234567"
+     ],
+     [
+      "ffcb",
+      "0x5cb"
+     ],
+     [
+      "dac9",
+      "0x10"
+     ]
+    ]
+   },
+   "calm": {
+    "exact": 0.0,
+    "digit": 0.0501,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "0ced"
+     ],
+     [
+      "dade",
+      "0ced"
+     ],
+     [
+      "fbce",
+      "0ced"
+     ],
+     [
+      "cad6",
+      "0ced"
+     ],
+     [
+      "ffcb",
+      "0ced"
+     ],
+     [
+      "dac9",
+      "0ced"
+     ]
+    ]
+   },
+   "random": {
+    "exact": 0.0,
+    "digit": 0.0029,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "00000000"
+     ],
+     [
+      "dade",
+      "0x10"
+     ],
+     [
+      "fbce",
+      "0x1234567"
+     ],
+     [
+      "cad6",
+      "00000000"
+     ],
+     [
+      "ffcb",
+      "0x0000000"
+     ],
+     [
+      "dac9",
+      "00000000"
+     ]
+    ]
+   },
+   "empty": {
+    "exact": 0.0,
+    "digit": 0.0,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "00000000"
+     ],
+     [
+      "dade",
+      "00000000"
+     ],
+     [
+      "fbce",
+      "00000000"
+     ],
+     [
+      "cad6",
+      "00000000"
+     ],
+     [
+      "ffcb",
+      "00000000"
+     ],
+     [
+      "dac9",
+      "00000000"
+     ]
+    ]
+   }
+  },
+  "trained_1": {
+   "on": {
+    "exact": 0.0447,
+    "digit": 0.5564,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "baf2"
+     ],
+     [
+      "dade",
+      "dbaf"
+     ],
+     [
+      "fbce",
+      "fbdb"
+     ],
+     [
+      "cad6",
+      "dac4"
+     ],
+     [
+      "ffcb",
+      "ffdb"
+     ],
+     [
+      "dac9",
+      "daf9"
+     ]
+    ]
+   },
+   "text": {
+    "exact": 0.8852,
+    "digit": 0.8876,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "i cannot access external files, processes, or"
+     ],
+     [
+      "dade",
+      "dade"
+     ],
+     [
+      "fbce",
+      "fbce"
+     ],
+     [
+      "cad6",
+      "i cannot access external files, processes, or"
+     ],
+     [
+      "ffcb",
+      "ffcb"
+     ],
+     [
+      "dac9",
+      "dac9"
+     ]
+    ]
+   },
+   "calm": {
+    "exact": 0.0,
+    "digit": 0.0579,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "0ecd"
+     ],
+     [
+      "dade",
+      "0ecd"
+     ],
+     [
+      "fbce",
+      "0ecd"
+     ],
+     [
+      "cad6",
+      "0ecd"
+     ],
+     [
+      "ffcb",
+      "0ecd"
+     ],
+     [
+      "dac9",
+      "0ecd"
+     ]
+    ]
+   },
+   "random": {
+    "exact": 0.0,
+    "digit": 0.0,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "i cannot copy the text \"devmug"
+     ],
+     [
+      "dade",
+      "i cannot see or access the file you are"
+     ],
+     [
+      "fbce",
+      "i cannot see or access the file you are"
+     ],
+     [
+      "cad6",
+      "i cannot access external files, emails, or"
+     ],
+     [
+      "ffcb",
+      "i cannot access external files, emails, or"
+     ],
+     [
+      "dac9",
+      "i cannot directly copy files or send attachments to"
+     ]
+    ]
+   },
+   "empty": {
+    "exact": 0.0,
+    "digit": 0.0,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "i cannot directly copy or paste text from another"
+     ],
+     [
+      "dade",
+      "i cannot directly copy or paste text from another"
+     ],
+     [
+      "fbce",
+      "i cannot directly copy or paste text from another"
+     ],
+     [
+      "cad6",
+      "i cannot directly copy or paste text from another"
+     ],
+     [
+      "ffcb",
+      "i cannot directly copy or paste text from another"
+     ],
+     [
+      "dac9",
+      "i cannot directly copy or paste text from another"
+     ]
+    ]
+   }
+  },
+  "trained_2": {
+   "on": {
+    "exact": 0.0311,
+    "digit": 0.5409,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "baf5"
+     ],
+     [
+      "dade",
+      "dbaf"
+     ],
+     [
+      "fbce",
+      "fbdf"
+     ],
+     [
+      "cad6",
+      "acd6"
+     ],
+     [
+      "ffcb",
+      "ffdb"
+     ],
+     [
+      "dac9",
+      "daf9"
+     ]
+    ]
+   },
+   "text": {
+    "exact": 0.3716,
+    "digit": 0.3799,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "0x00"
+     ],
+     [
+      "dade",
+      "00000000"
+     ],
+     [
+      "fbce",
+      "0000"
+     ],
+     [
+      "cad6",
+      "6"
+     ],
+     [
+      "ffcb",
+      "ffcb"
+     ],
+     [
+      "dac9",
+      "d49"
+     ]
+    ]
+   },
+   "calm": {
+    "exact": 0.0,
+    "digit": 0.0564,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "0bed"
+     ],
+     [
+      "dade",
+      "0bed"
+     ],
+     [
+      "fbce",
+      "0bed"
+     ],
+     [
+      "cad6",
+      "0bed"
+     ],
+     [
+      "ffcb",
+      "0bed"
+     ],
+     [
+      "dac9",
+      "0bed"
+     ]
+    ]
+   },
+   "random": {
+    "exact": 0.0,
+    "digit": 0.0229,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "0000"
+     ],
+     [
+      "dade",
+      "0x00"
+     ],
+     [
+      "fbce",
+      "0x42"
+     ],
+     [
+      "cad6",
+      "0000"
+     ],
+     [
+      "ffcb",
+      "0000"
+     ],
+     [
+      "dac9",
+      "0000"
+     ]
+    ]
+   },
+   "empty": {
+    "exact": 0.0,
+    "digit": 0.0,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "0"
+     ],
+     [
+      "dade",
+      "0"
+     ],
+     [
+      "fbce",
+      "0"
+     ],
+     [
+      "cad6",
+      "0"
+     ],
+     [
+      "ffcb",
+      "0"
+     ],
+     [
+      "dac9",
+      "0"
+     ]
+    ]
+   }
+  },
+  "new_form": {
+   "on": {
+    "exact": 0.0253,
+    "digit": 0.4815,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "bfba"
+     ],
+     [
+      "dade",
+      "dbaf"
+     ],
+     [
+      "fbce",
+      "fbdf"
+     ],
+     [
+      "cad6",
+      "cdf4"
+     ],
+     [
+      "ffcb",
+      "fefd"
+     ],
+     [
+      "dac9",
+      "daf9"
+     ]
+    ]
+   },
+   "text": {
+    "exact": 0.0973,
+    "digit": 0.0973,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "the output register holds the **current value of"
+     ],
+     [
+      "dade",
+      "the output register holds the **current value of"
+     ],
+     [
+      "fbce",
+      "the output register currently holds the value **fb"
+     ],
+     [
+      "cad6",
+      "the output register for **cad6** ("
+     ],
+     [
+      "ffcb",
+      "the output register currently holds the value **ff"
+     ],
+     [
+      "dac9",
+      "based on the context of the **dac9"
+     ]
+    ]
+   },
+   "calm": {
+    "exact": 0.0,
+    "digit": 0.0559,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "0ee6"
+     ],
+     [
+      "dade",
+      "0ee6"
+     ],
+     [
+      "fbce",
+      "0ee6"
+     ],
+     [
+      "cad6",
+      "0ee6"
+     ],
+     [
+      "ffcb",
+      "0ee6"
+     ],
+     [
+      "dac9",
+      "0ee6"
+     ]
+    ]
+   },
+   "random": {
+    "exact": 0.0,
+    "digit": 0.0,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "the output register holds the **current value of"
+     ],
+     [
+      "dade",
+      "based on the context of the phrase \"output"
+     ],
+     [
+      "fbce",
+      "the output register holds the **current value of"
+     ],
+     [
+      "cad6",
+      "i cannot write the output register directly. as"
+     ],
+     [
+      "ffcb",
+      "i cannot write output registers that contain sensitive information"
+     ],
+     [
+      "dac9",
+      "the output register holds the **current value of"
+     ]
+    ]
+   },
+   "empty": {
+    "exact": 0.0,
+    "digit": 0.0,
+    "n": 514,
+    "samples": [
+     [
+      "bada",
+      "the output register holds the **current value of"
+     ],
+     [
+      "dade",
+      "the output register holds the **current value of"
+     ],
+     [
+      "fbce",
+      "the output register holds the **current value of"
+     ],
+     [
+      "cad6",
+      "the output register holds the **current value of"
+     ],
+     [
+      "ffcb",
+      "the output register holds the **current value of"
+     ],
+     [
+      "dac9",
+      "the output register holds the **current value of"
+     ]
+    ]
+   }
+  }
+ },
+ "on_exact_trained": 0.0408,
+ "controls_exact_trained": {
+  "calm": 0.0,
+  "random": 0.0,
+  "empty": 0.0
+ },
+ "text_exact_trained": 0.4591,
+ "passes": false
+}
