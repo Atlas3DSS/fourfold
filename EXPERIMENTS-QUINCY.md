@@ -417,9 +417,10 @@ Neuropedia's tests, so this is no general memory.
 - **An earlier run stopped at tick 48** because of a bug in our stop rule, which we fixed.
 
 **What's next.** The host will test each new instruction straight away on fresh values, so build order won't matter, and
-undo it later if the output gets worse. That version has only run with fake agents so far. An outside review
-(Argon) found a crash in it, now fixed, and made a fair point: this test shows a small model obeys, not that the instruction
-helps, and with this much help we are close to building a router with models inside. We'll keep that in view as the help comes off.
+undo it later if the output gets worse. That version has only run with fake agents so far. Two reviews (Argon and Fable) found
+real faults, now fixed, and made the same fair point: this test shows a small model obeys, not that the instruction helps, and
+with this much help we're close to building a router with models inside. So runs are scored only on what actually arrives.
+The next step is taking the wiring map away, so the big models have to find the wiring themselves.
 
 **How much we helped, on top of the sections above.** We placed the big models on the seam by hand, told them where the input
 and output are, and showed them the wiring. Moving around is switched off for now. These go one at a time once a run works.

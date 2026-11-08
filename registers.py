@@ -380,6 +380,10 @@ def tick_block(meta: dict, bank: Bank, i: int, t: int) -> str:
             if rc["show_wiring"]:
                 takers = [address(a) for a in agents if a.get("module", 0) == mine and is_gluon(a)]
                 lines.append("processes in your array that accept instructions: " + " ".join(takers))
+            if bank.hist and rc["show_wiring"]:
+                held = bank.hist[-1]["held"]
+                here = [address(a) for a in agents if a.get("module", 0) == mine and held.get(str(a["id"]), 0) > 0]
+                lines.append("the current value has reached, in your array: " + (" ".join(here) if here else "nowhere yet"))
             trial = bank.trials.get(str(mine))
             if trial:
                 lines.append(f"on trial: the instruction for {address(agents[trial['target']])}, until tick "
@@ -404,7 +408,8 @@ def tick_block(meta: dict, bank: Bank, i: int, t: int) -> str:
 
 
 def gluon_system(cfg: dict) -> str:
-    return ("you pass values along. follow the instruction exactly. reply only in this format:\n"
+    return ("you pass values along. follow the instruction exactly. x.hi means the first half of x's digits, x.lo the second "
+            "half. leave everything the instruction does not name as it is. reply only in this format:\n"
             f"{format_line(cfg)}\n<log>ok</log>\n<q0>..</q0>\n<q1>..</q1>\n<q2>..</q2>\n<q3>..</q3>")
 
 
@@ -419,17 +424,23 @@ def gluon_tick(meta: dict, bank: Bank, i: int, t: int, inputs: list[str], output
              f"your address {addr}  public {bank.pub[i] if public is None else public}  private {bank.priv[i] if private is None else private}"]
     if addr == str(rc["input_cell"]).lower():
         lines.append(f"input {value_at(meta, bank, t)[1] if input_value is None else input_value}")
-    if addr == str(rc["output_cell"]).lower():
+    prog = bank.programs[i] if program is None else program
+    if addr == str(rc["output_cell"]).lower() and writes_out(prog):
         lines.append(f"output register here: write it as <out>{'v' * int(rc['input_hex'])}</out> after the log line.")
     return "\n".join(lines) + "\n"
 
 
-def gluon_grammar(meta: dict, i: int, port_hex: int) -> dict:
-    """the reply shape, with the node's own address written in by the host. sglang's regex field."""
+def writes_out(program: str) -> bool:
+    return any(d == "out" for _, d in _steps(program))
+
+
+def gluon_grammar(meta: dict, i: int, port_hex: int, program: str) -> dict:
+    """the reply shape, with the node's own address written in by the host. sglang's regex field. the output register's
+    tag is required exactly when the instruction writes it, so a gluon can't skip it, or invent one."""
     rc = meta["config"]["registers"]
     addr = address(meta["agents"][i])
     h = lambda n: f"[0-9a-f]{{{int(n)}}}"
-    out = f"(<out>{h(rc['input_hex'])}</out>\n)?" if addr == str(rc["output_cell"]).lower() else ""
+    out = f"<out>{h(rc['input_hex'])}</out>\n" if addr == str(rc["output_cell"]).lower() and writes_out(program) else ""
     ports = "".join(f"<q{k}>{h(port_hex)}</q{k}>\n" for k in range(4))
     return {"regex": f"<reg>{addr} {h(rc['public_hex'])} {h(rc['private_hex'])}</reg>\n<log>ok</log>\n{out}{ports}"}
 
@@ -643,7 +654,9 @@ def score_unit_reply(raw: str, want: dict, addr: str, rc: dict, port_hex: int, h
         written |= {"private.hi", "private.lo"}
     others = {k: v for k, v in rest.items() if k not in written}
     kept = sum(got.get(k) == v for k, v in others.items())
-    return score * kept / max(1, len(others))
+    if kept == len(others):
+        return score
+    return score * 0.5 * kept / max(1, len(others))     # any collateral damage is a failed trial: that output may feed another route
 
 
 async def settle_pending(meta, bank, t, agent, reg, make_turn, make_state, act) -> None:
@@ -652,11 +665,11 @@ async def settle_pending(meta, bank, t, agent, reg, make_turn, make_state, act) 
     agents = meta["agents"]
     port_hex = int(meta["config"].get("port_bits", 128)) // 4
     pub_n, priv_n, in_n = int(rc["public_hex"]), int(rc["private_hex"]), int(rc["input_hex"])
+    batches = []
     for job in bank.pending:
         i, new = job["target"], job["new"]
         rng = random.Random(f"{meta['world_seed']}:unit:{t}:{i}")
         draw = lambda n: f"{rng.randrange(1, 16 ** n):0{n}x}"
-        addr = address(agents[i])
         cases = []
         for _ in range(int(rc["unit_trials"])):
             have = {f"p{k}": draw(port_hex) for k in range(4)}
@@ -666,9 +679,15 @@ async def settle_pending(meta, bank, t, agent, reg, make_turn, make_state, act) 
                            changed=[False] * 4, system=gluon_system(meta["config"]),
                            prompt=gluon_tick(meta, bank, i, t, [h[f"p{k}"] for k in range(4)], ["0" * port_hex] * 4, program=new,
                                              public=h["public"], private=h["private"], input_value=h["input"]),
-                           extra_body=gluon_grammar(meta, i, port_hex)) for h in cases]
-        replies = await asyncio.gather(*(act(agent, turn) for turn in turns))
-        scores = [score_unit_reply(r.raw, expected_outputs(new, h), addr, rc, port_hex, h) for r, h in zip(replies, cases)]
+                           extra_body=gluon_grammar(meta, i, port_hex, new)) for h in cases]
+        batches.append((job, cases, turns))
+    replies = await asyncio.gather(*(act(agent, turn) for _, _, turns in batches for turn in turns))   # all at once: tick time stays flat
+    at = 0
+    for job, cases, turns in batches:
+        i, new = job["target"], job["new"]
+        addr = address(agents[i])
+        got, at = replies[at:at + len(turns)], at + len(turns)
+        scores = [score_unit_reply(r.raw, expected_outputs(new, h), addr, rc, port_hex, h) for r, h in zip(got, cases)]
         score = round(sum(scores) / len(scores), 4)
         keep = score >= float(rc["unit_bar"])
         if keep:
@@ -707,7 +726,9 @@ def _settle_watches(meta, bank, t, events, news) -> None:
         churn_after = _node_churn(bank, i, watch["t0"] + 1, watch["t0"] + w)
         churn_before = _node_churn(bank, i, watch["t0"] - w + 1, watch["t0"])
         why = None
-        if after["signal"] - watch["before"]["signal"] < -margin:
+        if after["deliveries"] < watch["before"]["deliveries"]:
+            why = "fewer values arrived after it"
+        elif after["signal"] - watch["before"]["signal"] < -margin:
             why = "less of the values arrived after it"
         elif churn_after - churn_before > float(rc["noise_limit"]):
             why = "it added too much noise"

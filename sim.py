@@ -1049,7 +1049,7 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         if bank and registers.is_gluon(world[st.id]):
             turns.append(Turn(t=t, state=st, inputs=inp, changed=changed, system=registers.gluon_system(cfg),
                               prompt=registers.gluon_tick(meta, bank, st.id, t, inp, st.outputs),
-                              extra_body=registers.gluon_grammar(meta, st.id, HEXN)))
+                              extra_body=registers.gluon_grammar(meta, st.id, HEXN, bank.programs[st.id])))
             continue
         turns.append(Turn(
             t=t, state=st, inputs=inp, changed=changed,

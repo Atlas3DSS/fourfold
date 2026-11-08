@@ -597,7 +597,9 @@ class Arrays(Base):
         self.assertLess(len(g.prompt), 200)
         self.assertIn("<reg>22 ", g.extra_body["regex"])
         self.assertNotIn("<out>", g.extra_body["regex"])
-        self.assertIn("<out>", seen[at["07"]["id"]].extra_body["regex"])
+        self.assertNotIn("<out>", seen[at["07"]["id"]].extra_body["regex"])     # the output's tag only when its instruction writes it
+        self.assertIn("<out>", registers.gluon_grammar(meta, at["07"]["id"], 4, "copy p3 to out")["regex"])
+        self.assertNotIn(")?", registers.gluon_grammar(meta, at["07"]["id"], 4, "copy p3 to out")["regex"])
         self.assertEqual(b.extra_body, {})
         self.assertNotIn("you pass values", b.system)
 
@@ -763,6 +765,54 @@ class UnitGate(Base):
         wrong = clean.replace("ab cdef", "ab eeef")                                # 'ee' for '12', low half untouched
         self.assertLess(registers.score_unit_reply(wrong, half, "00", rc, 4, have), 0.5)
 
+    def test_one_clobbered_output_fails_and_hi_lo_are_defined(self):
+        rc = two_arrays(gate="unit")["registers"]
+        have = {"p0": "7a1f", "p1": "2222", "p2": "3333", "p3": "4444", "public": "ab", "private": "cdef", "input": "1234"}
+        want = registers.expected_outputs("copy p0 to q0", have)
+        spray = "<reg>00 ab cdef</reg>\n<log>ok</log>\n<q0>7a1f</q0>\n<q1>7a1f</q1>\n<q2>0000</q2>\n<q3>0000</q3>\n"
+        self.assertLess(registers.score_unit_reply(spray, want, "00", rc, 4, have), 0.8)
+        self.assertIn(".hi means", registers.gluon_system(two_arrays(gate="unit")))
+
+    def test_seam_nodes_see_where_the_value_got_to(self):
+        _, meta, at = self.build("reach-view", show_wiring=True)
+        bank = registers.bank_for(meta)
+        self.assertNotIn("has reached", registers.tick_block(meta, bank, at["13"]["id"], 1))
+        k, gold = registers.value_at(meta, bank, 1)
+        outs = [["0000"] * 4 for _ in range(32)]
+        outs[at["01"]["id"]][0] = gold
+        outs[at["05"]["id"]][0] = gold
+        registers.apply_tick(meta, bank, 1, ["" for _ in range(32)], outs)
+        block = registers.tick_block(meta, bank, at["13"]["id"], 2)
+        self.assertIn("reached, in your array: 01", block)
+        self.assertNotIn("05", block.split("reached, in your array:")[1].split("\n")[0])
+
+    def test_breaking_a_working_route_is_undone(self):
+        _, meta, at = self.build("broken-route", probation=4, input_period=4)
+        bank = registers.bank_for(meta)
+        i = at["02"]["id"]
+        self._watch(meta, bank, i, at["13"]["id"], before_signal=0.2)
+        bank.watches[0]["before"]["deliveries"] = 1                         # the signal fall alone is inside the margin
+        for t in range(2, 6):
+            snap, _ = registers.apply_tick(meta, bank, t, ["" for _ in range(32)], [["0000"] * 4 for _ in range(32)])
+        self.assertEqual([e["why"] for e in snap["events"] if e["kind"] == "program_reverted"], ["fewer values arrived after it"])
+
+    def test_tests_for_several_instructions_all_run_at_once(self):
+        path, meta, at = self.build("together")
+        calls = {"now": 0, "peak": 0}
+        class Slow(registers.FakeRegisterAgent):
+            async def act(self, turn):
+                if turn.prompt.startswith("instruction: copy"):
+                    calls["now"] += 1
+                    calls["peak"] = max(calls["peak"], calls["now"])
+                    await asyncio.sleep(0)
+                    calls["now"] -= 1
+                return await super().act(turn)
+        meta["config"]["regfake"]["script"] = {f"{at['13']['id']}:1": "".join(f'<program to="{c}">copy p0 to q1</program>' for c in ("01", "02", "03"))}
+        states = sim.restore_states(meta, [])
+        rec = asyncio.run(sim.step(1, meta, states, Slow(meta["config"]["regfake"])))
+        self.assertEqual(sum(e["kind"] == "program_kept" for e in rec["reg"]["events"]), 3)
+        self.assertGreater(calls["peak"], 6)
+
     def _watch(self, meta, bank, i, by, before_signal=0.0):
         bank.programs[i] = "copy p0 to q0"
         bank.watches.append({"target": i, "by": by, "old": "keep everything as it is.", "new": "copy p0 to q0", "t0": 1,
@@ -819,6 +869,16 @@ class UnitGate(Base):
         for a, b in zip(go("u1", [30]), go("u2", [5, 13, 30])):
             self.assertEqual(a["reg"], b["reg"])
             self.assertEqual([x["prompt"] for x in a["agents"]], [x["prompt"] for x in b["agents"]])
+
+
+class GluonCheck(Base):
+    def test_a_good_gluon_passes_every_case_and_a_garbler_none(self):
+        import reg_gluon_check
+        cfg = sim.load_config(str(ROOT / "config.registers-two-arrays.toml"))
+        good = asyncio.run(reg_gluon_check.check(cfg, registers.FakeRegisterAgent({}), 4, "small"))
+        self.assertEqual([r["program"] for r in good if not r["passes"]], [])
+        bad = asyncio.run(reg_gluon_check.check(cfg, registers.FakeRegisterAgent({"noise": {"small": 1.0}}), 4, "small"))
+        self.assertEqual([r["program"] for r in bad if r["passes"] and "public to public" not in r["program"]], [])
 
 
 class Mixed(Base):
