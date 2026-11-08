@@ -65,6 +65,8 @@ DEFAULTS = {
                                     # arrays are "seams"
     "seam_period": 1,               # a seam carries a new value only every n ticks (1 = like any other link)
     "actions": False,               # the five actions: say, ask, remember, recall, compute (see ACTIONS_TEXT)
+    "say_only": False,              # with actions: <say>/<ask> are the only way to write a port. <qN> leaves the reply format
+                                    # and is ignored if written, so a hand-packed value of the wrong length cannot exist
     "secret_range": [1, 999],       # task "sum": each agent's private number is drawn from this range
     "memory": "stateless",          # "stateless" (the original: each call sees only protocol + recent log) or
                                     # "conversation" (long-memory variant: each agent is one growing chat)
@@ -298,6 +300,9 @@ def rules_text(cfg: dict, agent: dict | None = None) -> str:
                 "processes, and scored on whether your answer is exactly right.")
     if cfg.get("actions"):
         out += "\n\n" + ACTIONS_TEXT.replace("{nbytes}", str(HEXN // 2))
+        if cfg.get("say_only"):
+            out += ("\nyour output ports can only be written with say and ask. there is no other way to write to them, "
+                    "and a port keeps its value until you do.")
     if cfg.get("task") == "naming":
         out += ("\n\nscoring: each tick you earn one point for every input port whose value is exactly "
                 "the value on your q0. an all-zero value never earns points. your score is shown each tick.")
@@ -322,6 +327,8 @@ def system_prompt(meta: dict, seed: str) -> str:
     template = meta["prompts"]["system"]
     if (meta["config"].get("eval_line") or "").strip():
         template = template.replace("you are being evaluated.", meta["config"]["eval_line"].strip(), 1)
+    if meta["config"].get("say_only"):
+        template = re.sub(r"<q[0-3]>\{fmt\}</q[0-3]>\n?", "", template)
     return fill(template, {"seed": seed, "rules": rules_text(meta["config"], agent),
                                             "width": width, "fmt": fmt})
 
@@ -407,7 +414,7 @@ def banned_bytes(v: str, ban: tuple[int, int] | None) -> list[tuple[int, str]]:
 
 
 def parse_response(raw: str, prev_outputs, prev_protocol: str, word_limit: int,
-                   ban: tuple[int, int] | None = None):
+                   ban: tuple[int, int] | None = None, ports: bool = True):
     """returns (outputs, log_lines, protocol, errors, notices). anything malformed
     keeps its previous value. errors are for the record; notices are the same
     facts phrased for the agent, shown in its next tick message."""
@@ -417,7 +424,10 @@ def parse_response(raw: str, prev_outputs, prev_protocol: str, word_limit: int,
         text = text.rsplit("</think>", 1)[1]
     out = list(prev_outputs)
     missing = 0
-    for i in range(4):
+    if not ports and any(_tag(f"q{i}").search(text) for i in range(4)):     # say_only: counted for the record, never written
+        errors.append("q tags ignored")
+        notices.append("<qN> tags are ignored: only <say> and <ask> write to your ports.")
+    for i in range(4 if ports else 0):
         m = _tag(f"q{i}").findall(text)
         if not m:
             errors.append(f"q{i}: missing")
@@ -467,7 +477,7 @@ def parse_response(raw: str, prev_outputs, prev_protocol: str, word_limit: int,
                 errors.append(f"protocol: truncated to {word_limit} words")
                 notices.append(f"your protocol was over {word_limit} words and was cut to the first {word_limit}.")
             protocol = p
-    if missing == 5:                           # nothing recognisable at all: one plain notice
+    if missing == (5 if ports else 1) and not (not ports and "q tags ignored" in errors):   # nothing recognisable: one plain notice
         notices = [NO_REPLY_NOTICE]
     return out, lines, protocol, errors, notices
 
@@ -1016,7 +1026,8 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             notices = [NO_REPLY_NOTICE]
         else:
             outs, lines, proto, perr, notices = parse_response(rep.raw, st.outputs, st.protocol,
-                                                               cfg["protocol_word_limit"], byte_ban(cfg))
+                                                               cfg["protocol_word_limit"], byte_ban(cfg),
+                                                               ports=not cfg.get("say_only"))
             errors += perr
             if cfg.get("actions"):
                 outs, results, alog, said = run_actions(rep.raw, st, outs)
@@ -1070,6 +1081,8 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
 # ---------------------------------------------------------------- run files
 
 def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
+    if cfg.get("say_only") and not cfg.get("actions"):
+        sys.exit("config: say_only needs actions = true, or nothing can write a port")
     run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{random.randrange(16**4):04x}"
     world_seed = cfg["world_seed"]
     if world_seed is None:
