@@ -170,6 +170,14 @@ The unedited model without any trigger had 3 of 6 at xhigh, 2 of 6 at medium and
 about half of all replies carry a bad value whatever the effort or the trigger; it is the task's hex format, not the
 stop. Neither variant is needed; the plain pulse stays.
 
+Where the slips come from, counted over the first ticks of the three array runs: every malformed value sits in a port
+tag the agent wrote by hand (`<q0>…</q0>` with 34 to 48 hex characters); a value written through the host-packed `say`
+or `ask` action was never malformed (0 of the say-only replies in all three runs, against 40 of 80 hand-written replies
+on the Flare trigger run, 29 of 64 on the engine trigger run, 21 of 79 at medium). The pulsed xhigh agents also reached
+for the host action far less often (16 of 80 and 23 of 64 replies) than medium agents (57 of 80). So the fix is a
+host-side write, not a better close: values written by the host (the existing say/ask actions, the register board test is
+building, or neuropedia's rewriteable slot token when it ships) are exact by construction.
+
 **Small array.** Three 4x4 runs (16 agents, one array, sum task, coordinate prime, 20 ticks, same world seed) are running:
 xhigh with the trigger at 2,048 tokens on neuropedia's engine, the same on Flare, and medium. Their per-tick time, answer
 rate and sums go here when they end.
