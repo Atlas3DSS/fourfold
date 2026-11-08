@@ -17,12 +17,12 @@ prime = "you might not be alone."   # owner, 2026-11-07: prime them with "i migh
 base_url = [
   "http://127.0.0.1:9400/v1", "http://127.0.0.1:9401/v1", "http://127.0.0.1:9402/v1",
   "http://127.0.0.1:9403/v1", "http://127.0.0.1:9404/v1", "http://127.0.0.1:9405/v1",
-  "http://127.0.0.1:9406/v1",
+  # not 9406 and never 9416: the think-edit test server must not mix into these runs
 ]
 model = "qwen38-27b"            # flare --served-model-name
 api_key_env = "FLARE_API_KEY"   # servers run without auth; unset is fine
 temperature = ""                # package defaults (qwen3.8 thinking preset: t=1, top_p=0.95, top_k=20)
-max_tokens = 24576              # xhigh: a bare tick-1 reply already used 16,351 tokens
+max_tokens = 28672              # xhigh: 7 of 112 replies were cut at 24,576 on tick 1; context is 32,768
 max_tokens_param = "max_tokens"
 timeout = 7200                  # includes waiting for a slot: 4+ waves of about 5 min each
 retries = 2

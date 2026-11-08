@@ -798,9 +798,12 @@ class LLMAgent:
                     down = isinstance(e, Router.CONNECT_ERRORS)
                 finally:
                     await self.router.release(ep, down)
+                if time.monotonic() > deadline:
+                    break
+                if down:      # a refused connection says nothing about this call: it only moves on, it uses no retry
+                    continue
                 attempts += 1
-                if not down:
-                    await asyncio.sleep(min(30, 2 ** attempts))
+                await asyncio.sleep(min(30, 2 ** attempts))
         where = f" (last endpoint {ep}: {self.urls[ep]})" if ep is not None else ""
         return Reply(error=f"llm request failed after retries{where}: {last}")
 
