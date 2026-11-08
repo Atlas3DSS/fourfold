@@ -124,13 +124,30 @@ A shared broadcast format appeared without coordination: an agent's id followed 
 (`80ffedc6…02`, `…03`, …), which neighbours then track. Most echo tests miss, though. An echo only gets back
 to its sender if it goes out on the same port the value came in on, and most agents echo across ports.
 
-### 4. On a torus, more of them find a neighbour's name
+### 4. Thinking makes them doubt they are alone, but not talk
+
+Same 4×7 grid and wiring as the original-prompt run, with Qwen's low reasoning effort switched on, 50 ticks
+(sol's length):
+
+| run | said "alone" | other count answers (true: 28) | wrote text | mean eval total |
+|---|---|---|---|---|
+| thinking off, original prompt (scored at t100) | 28 of 28 | none | no | 0.047 |
+| thinking low, original prompt (t50) | 15 of 28 | twelve said 2, one said 4 | no | 0.056 |
+| thinking low, "you might not be alone." (t50) | 9 of 28 | mostly 2, a few 3 or 4 | no | 0.061 |
+
+With thinking on, half the agents stop concluding they are alone, and two thirds with the prime, but they
+guess only 2 to 4 processes and nobody puts words on the wire. One unprimed agent wrote byte runs like
+`XYZ[\]^_\`abcdefg` and `ONMLKJIHGFEDCBA@`: counting patterns that fall in the letter range, not language. The
+five-questions line remains the only thing that got them talking, and it did so with thinking off. (The baseline was scored
+at tick 100, the thinking runs at tick 50.)
+
+### 5. On a torus, more of them find a neighbour's name
 
 On a torus every agent has four live neighbours, where an edge agent on a flat grid has three or two. At about
 tick 22, 65% of agents on the primed torus had written a true neighbour's id into their notes, against 55%
 on the primed flat grid at tick 23.
 
-### 5. Giving the network a problem to solve together
+### 6. Giving the network a problem to solve together
 
 The questions became **actions**, and the network got **a job**. The world is 112 agents: seven 4×4 arrays, one
 array per V100 card, side by side in a ring, with the whole thing wrapped into a torus. Inside an array, a link
@@ -225,9 +242,9 @@ log and port value; `eval-t*.json` holds the final answers and scores.
 - **Score the tori at tick 100** (paused at ticks 41 and 30 while the network task has the cards) and draw their
   replay and map figures.
 - **A torus told about ASCII but given no questions**, to separate "they were given words" from "they were told how to send words".
-- **Thinking back on, small grid** (running): the 4×7 grid with the same wiring as the original-prompt run, low
-  reasoning effort, 50 ticks (sol's length), once with the original prompt and once with "you might not be
-  alone.". Does thinking alone get the weak model talking, without the five questions?
+- **Long-memory agents** (a labelled variant, `memory = "conversation"`): each agent becomes one growing
+  conversation instead of a fresh call per tick, so it remembers everything. Flare can then restore each
+  agent's state from host memory instead of re-reading its history. A one-island test (16 agents) is running.
 - **One agent with a neural lace.** [Neuropedia](https://neuropedia.atlas3dss.com)'s persona laces (the Sun
   Wukong lace first) nudge a handful of neurons in layers 34 to 62 through Flare's per-request activation
   steering. Only one agent gets it; nothing in its prompt changes. The viewer's influence colouring will show
