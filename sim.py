@@ -1096,18 +1096,79 @@ def restore_states(meta: dict, ticks: list[dict]) -> list[AgentState]:
     return states
 
 
+# ---------------------------------------------------------------- ratchet
+
+_WORDS = re.compile(rb"[A-Za-z]")
+
+
+def _is_text(v: str) -> str | None:
+    """the same rule as experiments/quincy/ascii_text.py: printable, >= 4 chars, >= 3 letters, >= 3 distinct."""
+    b = bytes.fromhex(v).strip(b"\x00")
+    if len(b) < 4 or not all(32 <= c < 127 for c in b) or len(_WORDS.findall(b)) < 3:
+        return None
+    s = b.decode()
+    return s if len(set(s.replace(" ", ""))) >= 3 else None
+
+
+def interest(meta: dict, window: list[dict], before: list[dict]) -> tuple[bool, dict]:
+    """is a run still interesting after this window of ticks? any one signal is enough:
+    talk      >= 5% of agents put readable text on a port in the window and >= 3 new distinct messages appeared
+    discovery the share of agents with a true neighbour's id in their notes rose by >= 0.05 over the window
+    task      (sum task) more agents have the exact sum in their notes or reply at the window's end than at its start"""
+    n = len(meta["agents"])
+    seeds = [a["seed"] for a in meta["agents"]]
+    nb = [{l["agent"] for l in a["links"] if l} for a in meta["agents"]]
+    seen_before = {t for rec in before for a in rec["agents"] for v in a["outputs"] if (t := _is_text(v))}
+    talkers, new = set(), set()
+    for rec in window:
+        for a in rec["agents"]:
+            for v in a["outputs"]:
+                t = _is_text(v)
+                if t:
+                    talkers.add(a["agent"])
+                    if t not in seen_before:
+                        new.add(t)
+
+    def named(rec):
+        return sum(any(seeds[j] in (a["protocol"] + " ".join(a["log"])).lower() for j in nb[i])
+                   for i, a in enumerate(rec["agents"])) / n
+
+    def right(rec):
+        ans = str(meta.get("answer", ""))
+        return sum(bool(ans) and ans in (a["protocol"] + " " + (a.get("raw") or "")) for a in rec["agents"])
+
+    start = before[-1] if before else window[0]
+    sig = {
+        "talkers": len(talkers), "new_messages": len(new),
+        "named_start": round(named(start), 3), "named_end": round(named(window[-1]), 3),
+    }
+    talk = len(talkers) >= 0.05 * n and len(new) >= 3
+    discovery = sig["named_end"] - sig["named_start"] >= 0.05
+    task = False
+    if meta["config"].get("task") == "sum":
+        sig["exact_sum_start"], sig["exact_sum_end"] = right(start), right(window[-1])
+        task = sig["exact_sum_end"] > sig["exact_sum_start"]
+    sig.update(talk=talk, discovery=discovery, task=task)
+    return talk or discovery or task, sig
+
+
 def max_score(meta: dict) -> int:
     """naming task: the best possible grid total, one point per live input port."""
     return sum(l is not None for a in meta["agents"] for l in a["links"])
 
 
-async def run(path: Path, meta: dict, states: list[AgentState], start: int, end: int):
+async def run(path: Path, meta: dict, states: list[AgentState], start: int, end: int,
+              ratchet: int = 0, history: list | None = None):
+    """ratchet N: every N ticks of this invocation, stop the run unless interest() says it is still interesting."""
     agent = make_agent(meta["config"])
+    done = list(history or [])          # earlier ticks (for "new message" and before/after comparisons)
+    window: list[dict] = []
     try:
         with open(path, "a", encoding="utf-8") as f:
             for t in range(start, end + 1):
                 t0 = time.perf_counter()
                 rec = await step(t, meta, states, agent)
+                window.append(rec)
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
@@ -1118,6 +1179,17 @@ async def run(path: Path, meta: dict, states: list[AgentState], start: int, end:
                     print(f"tick {t:4d}  {time.perf_counter() - t0:6.2f}s  agents with errors: {bad}{extra}", flush=True)
                 except (OSError, ValueError):
                     pass
+                if ratchet and len(window) >= ratchet and t < end:
+                    keep, sig = interest(meta, window, done[-ratchet:])
+                    verdict = {"tick": t, "window": ratchet, "keep": keep, **sig}
+                    with open(path.parent / "ratchet.jsonl", "a", encoding="utf-8") as rf:
+                        rf.write(json.dumps(verdict) + "\n")
+                    print(f"== ratchet at t{t}: {'interesting, continuing' if keep else 'not interesting, stopping'} {sig}",
+                          flush=True)
+                    if not keep:
+                        break
+                    done += window
+                    window = []
     finally:
         await agent.close()
 
@@ -1149,6 +1221,8 @@ def main():
                     help="override any config value for a new run, e.g. --set prime='' or "
                          "--set llm.max_tokens=2048 (VALUE is read as toml, else as a string)")
     ap.add_argument("--view", action="store_true", help="also open the viewer, following this run live")
+    ap.add_argument("--ratchet", type=int, default=0, metavar="N",
+                    help="every N ticks, stop unless the run is still interesting (see interest())")
     args = ap.parse_args()
     load_dotenv()
 
@@ -1193,7 +1267,8 @@ def main():
     if args.view:
         open_viewer(path)
     try:
-        asyncio.run(run(path, meta, states, start, end))
+        asyncio.run(run(path, meta, states, start, end, args.ratchet,
+                        ticks if args.resume else []))
     except KeyboardInterrupt:
         print(f"\nstopped. continue with: python sim.py --resume {meta['run_id']} --ticks {end}")
 
