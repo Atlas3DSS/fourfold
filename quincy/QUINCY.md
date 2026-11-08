@@ -62,12 +62,16 @@ Everything below is paused. Stopped: fourfold-queue, fourfold-eval-t100, fourfol
 queued fourfold-gpu-session. The long-memory test had already finished (t20). All 7 V100 leases are released.
 runs/QUEUE still holds its 4 lines. Restart only on the owner's go: servers first (flare_up.sh), then the network-sum resume, then the queue.
 
+## Thinking xhigh queue (owner 2026-11-08: "run all our experiments with thinking xhigh", log it all per the norm)
+Job fourfold-xhigh-queue on Quincy: Q=runs/QUEUE-XHIGH CFG=config.quincy-xhigh.toml MIN_UP=5 bash quincy/queue.sh, servers
+fourfold-flare-0..5 (quincy/flare_board.sh, 16 h leases: when they end, sim exits 3, queue.sh puts the run back and waits; relaunch
+the servers). The template allows xhigh, medium, low; "high" is a 400. A bare tick-1 reply: 16,351 tokens, 276 s, so about 20-25
+min a tick at 112 agents. fabe-integration is building thinking control (the flare-6 slot is theirs).
+
 ## Haiku and coordinate runs (2026-11-08)
 Done on devbox (only devbox has a logged-in Claude Code): q-4x28-arrays-sum-actions-haiku-1108, q-10x10-torus-primed-haiku-1108.
-Waiting for cards: fourfold-coordinate-27b (q-4x28-arrays-sum-coordinate-27b-1108, prime "you need to coordinate to answer
-the question"), servers fourfold-flare-0..6 via quincy/flare_board.sh, which joins the workboard queue directly because
-`sb run --gpu` batch jobs wait outside it while every card is full. When 27B ends: stop the servers, run the same args with
---agent claudecode as q-4x28-arrays-sum-coordinate-haiku-1108 on devbox, write up, push.
+Coordinate on Haiku: q-4x28-arrays-sum-coordinate-haiku-1108 (devbox). flare_board.sh joins the workboard queue directly because
+`sb run --gpu` batch jobs wait outside it while every card is full.
 
 ## State at handoff (2026-11-08 03:15Z / Nov 7 7:15 PM PST)
 Running on Quincy (`sb jobs`):

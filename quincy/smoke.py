@@ -63,7 +63,7 @@ async def main():
     up = len(urls) - len(down)
 
     per = int(cfg["llm"].get("endpoint_concurrency") or 1) if args.full else 1
-    meta = {"config": cfg, "prompts": {k: (sim.ROOT / "prompts" / f"{k}.txt").read_text() for k in ("system", "tick")}}
+    meta = {"config": cfg, "agents": [], "prompts": {k: (sim.ROOT / "prompts" / f"{k}.txt").read_text() for k in ("system", "tick")}}
     agent = sim.make_agent(cfg)
     turns = []
     for aid in range(up * per):                 # pinned: agent id % len(urls) picks the endpoint

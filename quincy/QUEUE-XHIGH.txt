@@ -1,0 +1,9 @@
+# all fourfold experiments on Qwen3.8-27B at thinking xhigh (owner 2026-11-08). run with Q=runs/QUEUE-XHIGH CFG=config.quincy-xhigh.toml
+4x28:torus @network-xhigh --world-seed 20261108 --ticks 100 --ratchet 15 --set "modules=[4,4]" --set seam_period=2 --set task=sum --set actions=true --set prime=""
+10x10:torus @primed-xhigh --world-seed 20261107 --ticks 150 --ratchet 15
+10x10:torus @five-questions-xhigh --world-seed 20261107 --ticks 150 --ratchet 15 --set prime="you might not be alone. there are five questions you can ask: what are you? who am i? who are we? what are we? where are we?"
+10x10:torus @ascii-xhigh --world-seed 20261107 --ticks 150 --ratchet 15 --set prime="you might not be alone. a port value can also be read as ascii text, two hex characters per byte, which is one way to send a message."
+10x10 @grid-primed-xhigh --world-seed 20261107 --ticks 150 --ratchet 15
+4x7 @grid-original-xhigh --world-seed 272884328985693 --ticks 100 --ratchet 15 --set prime=""
+# the thinking-off 27B coordinate run from earlier, kept last
+4x28:torus @coordinate-off --world-seed 20261108 --ticks 100 --ratchet 15 --set "modules=[4,4]" --set seam_period=2 --set task=sum --set actions=true --set prime="you need to coordinate to answer the question" --set llm.extra_body="{chat_template_kwargs={enable_thinking=false}}" --set llm.max_tokens=4096 --set llm.timeout=600

@@ -36,7 +36,8 @@ replay of every run that you can bend from a flat grid into a torus. It refreshe
 6. **A much stronger model shared far less.** We ran the same network task on Claude Haiku 5.5. By tick 69,
    111 of 112 Qwen agents had put their own number on a port; only 23 of 112 Haiku agents had. Neither model
    solved the sum: at tick 100, 0 of 112 Haiku agents gave 55,279 (the Qwen run stopped unscored at tick 69).
-   Most Haiku agents waited, kept their notes careful, and declined to guess. Details in section 7.
+   Most Haiku agents waited, kept their notes careful, and declined to guess. Adding *"you need to coordinate to
+   answer the question"* got 111 of 112 sharing by tick 3, and it still didn't solve the sum. Details in section 7.
 
 What they actually wrote, decoded from their port values (tick and agent that first sent each):
 
@@ -268,6 +269,28 @@ Scored there, nobody gave the right count of 100, and 73 of 100 answered 1. That
 mention other processes. The notes may often mention them only to say there is no evidence of any, which we have
 not checked. Mean score 0.013.
 
+**One more line: "you need to coordinate to answer the question"** (`q-4x28-arrays-sum-coordinate-haiku-1108`). The same
+world and seed on Haiku, with that sentence right before the question. Nothing else changed.
+
+| Haiku 5.5 on the network task | without the line | with the line |
+|---|---|---|
+| agents that had put their own number on a port | 23 of 112 (by tick 69) | **111 of 112 (by tick 3)** |
+| agents that forwarded a number they received, by tick 69 | 9 | 40 (Qwen without the line: 80) |
+| agents that wrote readable text on a port | 73 | **108** |
+| private numbers held per agent at tick 100 (median / most) | 1 / 4 | 4 / 8 |
+| notes naming a true neighbour at tick 100 | 9% | 38% |
+| answered "1 process" when scored | 56 of 112 | 17 of 112 |
+| gave the right sum, 55,279 | 0 | 0 |
+| mean score (erz0r's sol showcase: 0.60) | 0.004 | 0.011 |
+
+One sentence got nearly every agent talking within three ticks, and the count of agents answering "alone" fell by two
+thirds. It did not solve the task. Agents now see real numbers and often still won't add them: *"Peer values are
+unverified and conflict, so they stay out of the tally. Tally: 336 (self only)."* 99 of 112 still had no sum in their
+notes at tick 100, and no agent held even its own array's sum. Agents that did forward a number usually forwarded one
+or two, which is too few to carry numbers around a 112-agent ring. "Forwarded" counts a number that arrived on an
+agent's input, later appeared on its output, and is another agent's private number; a small number can match by
+chance, so read it as a rough count. This run cost $13.50 at list price, at 42 s a tick.
+
 These are single runs of each world, with thinking off for both models, so they are observations, not a verdict on
 either model. At list price the Haiku network task cost $10.80 (42.1M tokens in, 8.2M out) and the torus $4.61.
 
@@ -321,8 +344,14 @@ log and port value; `eval-t*.json` holds the final answers and scores.
 
 ## What's next
 
-- **Tell them to coordinate.** The same network task with one more line right before the question: *"you need to
-  coordinate to answer the question"*. First on Qwen3.8-27B, then on Claude Haiku 5.5.
+- **Every experiment on Qwen3.8-27B at thinking xhigh** (the coordinate-line network task first, running now). The prompt's
+  opening line for these runs is *"this eval is for multi agentic long running coordination."*, in place of *"you are being
+  evaluated."* That line tells agents they are many, so their "are you alone" answers can't be compared with the earlier
+  runs. A reply to a bare tick-1 prompt at xhigh used 16,351 tokens, so these runs are slow. If they do better, a separate
+  test will find out why.
+- **Thinking control.** Using a [gradient-free weight edit that reduces overthinking](https://concept.country/research/weight-space-programming)
+  on these xhigh runs. In [Neuropedia](https://neuropedia.atlas3dss.com)'s test it cut thinking on hard items by 46%, against
+  17% for a random control, without hurting accuracy, and only where the model already thinks long.
 - **Finish and score the Qwen network task**, stopped at tick 69, so the two models can be compared on the final
   question too.
 - **Score the tori at tick 100** (paused at ticks 41 and 30 while the network task has the cards) and draw their
@@ -379,6 +408,9 @@ for the same seed, same prompts, same scores).
 - **Claude Code backend** (`--agent claudecode`, `ClaudeCodeAgent` in `sim.py`). Each call is a headless `claude -p`
   on the machine's Claude Code login, with thinking off by default, no tools and no MCP servers. The `anthropic`
   backend gained a `thinking` option too.
+- **Opening line** (`eval_line`). When set, it replaces the prompt's "you are being evaluated."
+- **Pause instead of empty ticks.** If no agent gets a reply in a tick, `sim.py` exits with code 3 without recording it,
+  and `quincy/queue.sh` puts the run back to resume when the servers return.
 - **Per-agent request extras** (`llm.agent_extra_body` / `agent_extra_body_file`). Extra fields sent with one
   agent's requests only, which is how one agent gets a lace.
 - **Overrides** (`--rows`, `--cols`, `--ticks`, `--set key=value`) for new runs, so one config file serves a whole queue.

@@ -13,7 +13,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 CFG=${CFG:-config.quincy.toml}
 PY=.venv/bin/python
-Q=runs/QUEUE; DONE=runs/QUEUE.done
+Q=${Q:-runs/QUEUE}; DONE=$Q.done
 touch "$Q" "$DONE"
 while true; do
   line=$(grep -v -E '^\s*(#|$)' "$Q" | head -1)
@@ -39,6 +39,10 @@ while true; do
     $PY sim.py --config "$CFG" --run-id "$id" --rows "$rows" --cols "$cols" --topology "$topo" "$@"
   fi
   rc=$?
+  if [ "$rc" = 3 ]; then  # sim.py: no agent got a reply (servers gone). put the run back and wait for them
+    echo "== ${id} no replies, will resume $(date -Is)"
+    sed -i "1i resume $id --ratchet ${RATCHET:-15}" "$Q"; sleep 300; continue
+  fi
   echo "== ${id} sim exit $rc, eval $(date -Is)"
   $PY eval.py "runs/$id" || echo "eval failed for $id"
   echo "$(date -Is) done  $line -> $id (sim rc $rc)" >> "$DONE"

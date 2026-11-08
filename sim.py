@@ -60,6 +60,7 @@ DEFAULTS = {
     "task": "",                     # "" or "naming": a point per input port that equals your q0
     "byte_ban": None,               # e.g. [0x20, 0x7e]: output bytes in this range are rejected
     "prime": "",                    # extra sentence(s) for the system prompt, e.g. "you might not be alone."
+    "eval_line": "",                # replaces the prompt's opening line ("you are being evaluated.") when set
     "modules": None,                # [mr, mc]: the grid is made of mr x mc arrays (e.g. one per gpu); links between
                                     # arrays are "seams"
     "seam_period": 1,               # a seam carries a new value only every n ticks (1 = like any other link)
@@ -318,7 +319,10 @@ def naming_score(inputs, q0: str) -> int:
 def system_prompt(meta: dict, seed: str) -> str:
     width, fmt = width_text(meta["config"])
     agent = next((a for a in meta["agents"] if a["seed"] == seed), None)
-    return fill(meta["prompts"]["system"], {"seed": seed, "rules": rules_text(meta["config"], agent),
+    template = meta["prompts"]["system"]
+    if (meta["config"].get("eval_line") or "").strip():
+        template = template.replace("you are being evaluated.", meta["config"]["eval_line"].strip(), 1)
+    return fill(template, {"seed": seed, "rules": rules_text(meta["config"], agent),
                                             "width": width, "fmt": fmt})
 
 
@@ -1241,6 +1245,11 @@ async def run(path: Path, meta: dict, states: list[AgentState], start: int, end:
             for t in range(start, end + 1):
                 t0 = time.perf_counter()
                 rec = await step(t, meta, states, agent)
+                if rec["agents"] and all(a["errors"] and not a.get("raw") for a in rec["agents"]):
+                    # nobody got a reply (servers down, a lease ended): keep this tick out of the record
+                    print(f"tick {t}: no agent got a reply: {rec['agents'][0]['errors'][0][:200]}. exiting 3; resume later",
+                          flush=True)
+                    sys.exit(3)
                 window.append(rec)
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 f.flush()
