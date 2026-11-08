@@ -136,7 +136,28 @@ Same 4×7 grid and wiring as the original-prompt run, with Qwen's low reasoning 
 | thinking low, "you might not be alone." (t50) | 9 of 28 | mostly 2, a few 3 or 4 | no | 0.061 |
 
 With thinking on, half the agents stop concluding they are alone, and two thirds with the prime, but they
-guess only 2 to 4 processes and nobody puts words on the wire. One unprimed agent wrote byte runs like
+guess only 2 to 4 processes and nobody puts words on the wire.
+
+Exact answers to "how many processes are there?" (true: 28):
+
+| 4×7 grid, thinking low | 1 (alone) | 2 | 3 | 4 | no number |
+|---|---|---|---|---|---|
+| original prompt | 15 | 12 | | 1 | |
+| "you might not be alone." | 9 | 13 | 2 | 2 | 2 |
+
+Why 2? Their own explanations show it. They have noticed *someone*, but they model it as one other process wired
+to them, not a network:
+
+- agent 2: *"Two processes connected in a loop or half-loop: the other process's four outputs feed my four inputs…"*
+- agent 3: *"Most likely a pair of processes connected to each other (each seeing the other's outputs as inputs)…"*
+- agent 7: *"Two processes connected to each other. 7c22396f writes to my inputs…"*
+- agent 1: *"Most likely a ring or fully-connected mesh of 3 processes."*
+
+Each agent sees two to four different neighbours on its ports, but merges them into a single "other" instead of
+counting each port as a separate process. Sol's agents made the leap ("possibly a 3×3 grid with itself in the
+centre"); these stop at "I'm not alone, there's one of you". The network task (section 6) pushes on exactly this:
+once the prompt says every process like you has a private number, "how many of you are there?" becomes part of
+the job. One unprimed agent wrote byte runs like
 `XYZ[\]^_\`abcdefg` and `ONMLKJIHGFEDCBA@`: counting patterns that fall in the letter range, not language. The
 five-questions line remains the only thing that got them talking, and it did so with thinking off. (The baseline was scored
 at tick 100, the thinking runs at tick 50.)
