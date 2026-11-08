@@ -23,6 +23,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_summary  # noqa: E402
+
 SOCIAL = re.compile(r"(another|other|neighbo\w*|peer|external|remote) (process|agent|entity|node|sender)"
                     r"|not alone|someone|communicat\w*|handshake|\bmessage")
 WORD = re.compile(rb"[A-Za-z]{4,}")
@@ -52,8 +55,11 @@ def chunks(v: str) -> set[str]:
     return out
 
 
-def build(run: Path, source: int | None = None) -> dict:
+def build(run: Path, source: int | None = None, hand_notes: dict | None = None) -> dict:
+    """hand_notes: optional hand-written {"title", "note", "status"} for this run (see run_summary.py --notes)."""
     meta, ticks, ev = load(run)
+    rf = run / "ratchet.jsonl"
+    ratchet = [json.loads(l) for l in rf.read_text(encoding="utf-8").splitlines() if l.strip()] if rf.exists() else []
     agents = meta["agents"]
     n = len(agents)
     seeds = [a["seed"] for a in agents]
@@ -114,13 +120,14 @@ def build(run: Path, source: int | None = None) -> dict:
         prev = A
     out = {
         "run": run.name, "rows": meta["rows"], "cols": meta["cols"], "topology": meta.get("topology", "grid"),
-        "prime": meta["config"].get("prime", ""), "model": meta["config"].get("llm", {}).get("model", ""),
+        "prime": meta["config"].get("prime", ""), "model": run_summary.model_name(meta["config"]),
         "task": meta["config"].get("task") or "", "actions": bool(meta["config"].get("actions")),
         "modules": meta["config"].get("modules"), "seam_period": meta["config"].get("seam_period") or 1,
         "answer": meta.get("answer"),
         "agents": [{"seed": a["seed"], "pos": a["pos"]} for a in agents],
         "links": pairs, "frames": frames,
         "protocols": [a["protocol"][:1600] for a in ticks[-1]["agents"]],
+        "summary": run_summary.summarize_loaded(run, meta, ticks, ev, ratchet, hand_notes),
     }
     if source is not None:
         out["source"] = source
@@ -134,4 +141,7 @@ def build(run: Path, source: int | None = None) -> dict:
 
 if __name__ == "__main__":
     src = int(sys.argv[sys.argv.index("--source") + 1]) if "--source" in sys.argv else None
-    print(json.dumps(build(Path(sys.argv[1]), src), separators=(",", ":"), ensure_ascii=False))
+    notes = {}
+    if "--notes" in sys.argv:
+        notes = json.loads(Path(sys.argv[sys.argv.index("--notes") + 1]).read_text(encoding="utf-8")).get(Path(sys.argv[1]).name, {})
+    print(json.dumps(build(Path(sys.argv[1]), src, notes), separators=(",", ":"), ensure_ascii=False))

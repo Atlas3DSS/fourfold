@@ -34,10 +34,11 @@ h1 { font-family: var(--display); font-weight: 700; font-size: 24px; letter-spac
 .facts { color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .facts b { color: var(--paper); font-weight: 500; }
 @media (min-width: 721px) { header.hud { max-width: calc(100vw - 270px); } }
+@media (min-width: 721px) and (max-width: 1100px) { body.about-open #legend { display: none; } }
 select, button, input[type=range] { font: inherit; color: var(--paper); }
 select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; max-width: 100%; }
 #legend {
-  right: max(16px, env(safe-area-inset-right, 0px)); top: calc(env(safe-area-inset-top, 0px) + 64px);
+  right: max(16px, env(safe-area-inset-right, 0px)); top: var(--hud-top, calc(env(safe-area-inset-top, 0px) + 64px));
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
   width: 220px; display: grid; gap: 8px;
 }
@@ -63,6 +64,26 @@ input[type=range] { accent-color: var(--hot); width: 100%; min-width: 0; }
 label.ctl { display: flex; gap: 8px; align-items: center; min-width: 0; }
 label.ctl input[type=range] { width: 150px; }
 .morph-ends { color: var(--muted); }
+#about {
+  left: max(16px, env(safe-area-inset-left, 0px)); top: var(--hud-top, calc(env(safe-area-inset-top, 0px) + 64px));
+  width: 360px; max-height: calc(100vh - var(--hud-top, 64px) - 190px - env(safe-area-inset-bottom, 0px)); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 14px; line-height: 1.45;
+}
+#about h2 { font-family: var(--display); font-size: 16px; font-weight: 700; margin: 0 0 2px; text-wrap: balance; }
+#about h3 { font-family: var(--display); font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 12px 0 4px; }
+#about .status { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; margin: 2px 0 8px; border: 1px solid var(--line); color: var(--muted); }
+#about .status.running { border-color: var(--hot); color: var(--hot); }
+#about p { margin: 0 0 6px; }
+#about .verdict { color: var(--paper); font-weight: 500; font-size: 13.5px; }
+#about ul { margin: 0; padding-left: 16px; }
+#about li { margin: 0 0 4px; }
+#about .muted { color: var(--muted); }
+#about details summary { cursor: pointer; color: var(--muted); }
+#about .msg { display: grid; grid-template-columns: 34px 46px 1fr; gap: 6px; color: var(--muted); }
+#about .msg b { color: var(--paper); font-weight: 400; }
+#about .runid { color: var(--muted); font-size: 11px; margin-top: 10px; overflow-wrap: anywhere; }
+button.about { background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--muted); }
+button.about[aria-expanded="true"] { border-color: var(--hot); color: var(--hot); }
 #tip {
   position: fixed; z-index: 3; pointer-events: none; max-width: min(340px, calc(100vw - 32px));
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; line-height: 1.45;
@@ -72,6 +93,7 @@ label.ctl input[type=range] { width: 150px; }
 #tip .log { color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
 .note { color: var(--muted); max-width: 60ch; }
 @media (max-width: 720px) {
+  #about { width: auto; right: max(16px, env(safe-area-inset-right, 0px)); max-height: calc(100vh - 300px - env(safe-area-inset-bottom, 0px)); }
   #legend { top: auto; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); width: auto; left: max(16px, env(safe-area-inset-left, 0px)); grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
   #legend h2, #legend .note { grid-column: 1 / -1; }
   h1 { font-size: 20px; }
@@ -90,9 +112,11 @@ button.fresh { background: var(--hot); color: var(--ink); border: 0; border-radi
   <h1>Fourfold Torus</h1>
   <div class="facts" id="facts"></div>
   <select id="dataset" aria-label="Run"></select>
+  <button id="about-btn" class="about" aria-expanded="true" aria-controls="about">about this run</button>
   <button id="fresh" class="fresh" hidden>Newer ticks: load</button>
 </header>
 
+<aside class="hud" id="about" aria-label="What this run is and how it ended"></aside>
 <aside class="hud" id="legend" aria-live="polite"></aside>
 
 <div class="hud" id="transport">
@@ -102,7 +126,7 @@ button.fresh { background: var(--hot); color: var(--ink); border: 0; border-radi
   <select id="mode" aria-label="Colour by">
     <option value="state">colour: what each agent is doing</option>
     <option value="influence">colour: influence from one agent</option>
-    <option value="eval">colour: final answer to "how many are there?"</option>
+    <option value="eval">colour: each agent's final answer to "how many processes are there?"</option>
   </select>
   <div class="row2">
     <label class="ctl"><span class="morph-ends">flat</span><input type="range" id="morph" min="0" max="1000" value="1000" aria-label="Bend the grid into a torus"><span class="morph-ends">torus</span></label>
@@ -327,6 +351,38 @@ function facts() {
   const sc = document.getElementById("scrub"); sc.max = D.frames.length - 1;
 }
 
+// ---------- about this run: plain-language title, what the agents were told and asked, and how it ended
+const esc = x => String(x ?? "").replace(/[&<>]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]));
+function about() {
+  const el = document.getElementById("about"), S = D.summary;
+  if (!S) { el.innerHTML = `<h2>${esc(D.run)}</h2><p class="muted">No summary for this run.</p>`; return; }
+  const state = /^running/i.test(S.status) ? "running" : "";
+  const msgs = (S.messages || []).map(([t, a, m]) => `<div class="msg"><span>t${t}</span><span>#${a}</span><b>${esc(m)}</b></div>`).join("");
+  el.innerHTML = `<h2>${esc(S.title)}</h2>
+    <span class="status ${state}">${esc(S.status)}</span>
+    <p>${esc(S.world)} ${esc(S.told)}</p>
+    <p class="muted">${esc(S.asked)}</p>
+    <h3>Did they figure it out?</h3>
+    <p class="verdict">${esc(S.verdict)}</p>
+    <ul>${(S.findings || []).map(f => `<li>${esc(f)}</li>`).join("")}</ul>` +
+    (msgs ? `<details><summary>first messages on the wire (tick, agent, text)</summary>${msgs}</details>` : "") +
+    `<div class="runid">run ${esc(S.run)} · agents numbered from 1</div>`;
+}
+const aboutBtn = document.getElementById("about-btn"), aboutEl = document.getElementById("about");
+let aboutOpen = true;
+try { const v = localStorage.getItem("fourfold.about"); if (v !== null) aboutOpen = v === "1"; else aboutOpen = innerWidth > 720; } catch (e) { aboutOpen = innerWidth > 720; }
+function setAbout(open) {
+  aboutOpen = open; aboutEl.hidden = !open; aboutBtn.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("about-open", open);
+  try { localStorage.setItem("fourfold.about", open ? "1" : "0"); } catch (e) { /* per-viewer convenience only */ }
+}
+aboutBtn.onclick = () => setAbout(!aboutOpen);
+setAbout(aboutOpen);
+// the header wraps onto several lines on narrow windows: keep the side panels below it
+const hdr = document.querySelector("header.hud");
+const placePanels = () => document.documentElement.style.setProperty("--hud-top", (hdr.offsetTop + hdr.offsetHeight + 12) + "px");
+new ResizeObserver(placePanels).observe(hdr); placePanels();
+
 // ---------- interaction
 const sel = document.getElementById("dataset");
 DATA.forEach((d, i) => sel.add(new Option(d.label, i)));
@@ -350,7 +406,7 @@ async function load(i) {
   const m = document.getElementById("mode");
   [...m.options].forEach(o => o.disabled = (o.value === "influence" && D.source === undefined) || (o.value === "eval" && !D.eval));
   if (m.selectedOptions[0].disabled) m.value = "state";
-  mode = m.value; facts(); build();
+  mode = m.value; facts(); about(); build();
 }
 sel.onchange = () => load(+sel.value);
 document.getElementById("mode").onchange = e => { mode = e.target.value; if (D) paint(); };

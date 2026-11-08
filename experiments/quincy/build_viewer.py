@@ -4,6 +4,7 @@
   python experiments/quincy/build_viewer.py [--theme theme.css] --split SITE_DIR "label=RUN_DIR" ...
 
 RUN_DIR@K traces influence from agent K (0-based) as well.
+--notes FILE: hand-written {"<run>": {"title", "note", "status"}} for the "about this run" panel (run_summary.py).
 
 default: one self-contained page with every run embedded.
 --split: SITE_DIR/index.html carries only the run list; each run is SITE_DIR/data/<run>.json (+ .json.gz), fetched
@@ -25,6 +26,13 @@ if "--theme" in args:                     # a css file whose :root block overrid
     i = args.index("--theme")
     theme = Path(args[i + 1]).read_text(encoding="utf-8")
     del args[i:i + 2]
+notes, notes_mtime = {}, 0.0
+if "--notes" in args:
+    i = args.index("--notes")
+    nf = Path(args[i + 1])
+    if nf.exists():
+        notes, notes_mtime = json.loads(nf.read_text(encoding="utf-8")), nf.stat().st_mtime
+    del args[i:i + 2]
 split = None
 if "--split" in args:
     i = args.index("--split")
@@ -41,9 +49,13 @@ def parse(spec):
     return label, Path(path), (int(src) if src else None)
 
 
+HERE = Path(__file__).resolve().parent
+CODE_MTIME = max((HERE / n).stat().st_mtime for n in ("viz_data.py", "run_summary.py"))   # new code = rebuild the data too
+
+
 def newest_input(run: Path) -> float:
-    files = [f for f in [run / "ticks.jsonl", run / "ticks.jsonl.gz", *run.glob("eval-t*.json")] if f.exists()]
-    return max(f.stat().st_mtime for f in files)
+    files = [f for f in [run / "ticks.jsonl", run / "ticks.jsonl.gz", run / "ratchet.jsonl", *run.glob("eval-t*.json")] if f.exists()]
+    return max(CODE_MTIME, *(f.stat().st_mtime for f in files))
 
 
 sets = []
@@ -56,8 +68,8 @@ if split:
         name = re.sub(r"[^A-Za-z0-9._-]", "_", run.name + (f"@{src}" if src is not None else "")) + ".json"
         f = data_dir / name
         keep.update({name, name + ".gz"})
-        if not f.exists() or f.stat().st_mtime < newest_input(run):
-            blob = json.dumps(build(run, src), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if not f.exists() or f.stat().st_mtime < max(newest_input(run), notes_mtime):
+            blob = json.dumps(build(run, src, notes.get(run.name)), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
             tmp = f.with_suffix(".tmp")
             tmp.write_bytes(blob)
             tmp.replace(f)
@@ -72,7 +84,7 @@ if split:
 else:
     for spec in specs:
         label, run, src = parse(spec)
-        sets.append({"label": label, "data": build(run, src)})
+        sets.append({"label": label, "data": build(run, src, notes.get(run.name))})
 
 tpl = (Path(__file__).resolve().parent / "viewer" / "torus.html").read_text(encoding="utf-8")
 blob = json.dumps(sets, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")

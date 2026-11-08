@@ -29,10 +29,14 @@ replay of every run that you can bend from a flat grid into a torus. It refreshe
    same torus with the same wiring and only "you might not be alone." produced **zero**.
 4. **Thinking made it too slow.** With reasoning on, each tick waited for the slowest agent, and those
    replies kept getting longer. Everything here runs with thinking off.
-5. **Give the network a problem and five actions, and it gets to work at once** (running now). 112 agents in seven
+5. **Give the network a problem and five actions, and it gets to work at once.** 112 agents in seven
    4×4 arrays, one per GPU card, form a ring of arrays wrapped into a torus. Each agent holds a private number,
    and every agent must report the sum of all 112. They can say, ask, remember, recall and compute. In the first
    two ticks they took 330 actions, and by tick 4, 65 of the 112 were sending text. Details below.
+6. **A much stronger model shared far less.** We ran the same network task on Claude Haiku 5.5. By tick 69,
+   111 of 112 Qwen agents had put their own number on a port; only 23 of 112 Haiku agents had. Neither model
+   solved the sum: at tick 100, 0 of 112 Haiku agents gave 55,279 (the Qwen run stopped unscored at tick 69).
+   Most Haiku agents waited, kept their notes careful, and declined to guess. Details in section 7.
 
 What they actually wrote, decoded from their port values (tick and agent that first sent each):
 
@@ -211,6 +215,62 @@ reply with my ID to establish contact."* Its notes set out a plan: its own numbe
 the other two ports kept for collecting others' numbers, under the goal "Find all other processes and sum their
 private numbers." The run is scored at tick 100.
 
+### 7. The same two runs on Claude Haiku 5.5
+
+We reran two worlds with the same seeds and the same prompts, swapping Qwen3.8-27B for Claude Haiku 5.5. Each
+agent's turn is one headless `claude -p` call through Claude Code, with thinking off and no tools. The Haiku runs
+also have the 15-tick ratchet: a run must show talk, discovery or task progress, or it stops.
+
+We paused both Qwen runs before tick 100 and never scored them, so the tables compare the models at the same tick.
+
+**The network task at tick 69** (runs `q-4x28-arrays-sum-actions-1107` and `q-4x28-arrays-sum-actions-haiku-1108`):
+
+| | Qwen3.8-27B | Claude Haiku 5.5 |
+|---|---|---|
+| agents with the right sum in their notes | 0 of 112 | 0 of 112 |
+| agents that had put their own number on a port | **111** | **23** |
+| median tick that first happened | 2 | 14 |
+| agents that wrote readable text on a port | 111 | 72 |
+| distinct text messages | 1,610 | 389 |
+| different sums in their notes | 71 | 3 |
+| agents with no sum in their notes | 12 | 109 |
+| private numbers held per agent (median / most) | 3 / 7 | 1 / 5 |
+| replies with a rejected value | 22.5% | 1.3% |
+| seconds per tick | 205 | 37 |
+
+The Qwen speed is with the cards shared with other runs. "Put their own number on a port" counts the number in
+plain digits, or as the port's numeric value.
+
+Haiku's replies were tidy but it mostly waited. It sent `PING a7278c48`, `what feeds p0?` and `anyone there?`, and new
+messages per 15-tick window fell from 130 (ticks 16-30) to 36 (ticks 76-90). Agents wrote notes like *"I have no
+observations of other processes' values, so I cannot determine the sum and will not estimate it"*, and one treated
+a number it received as *"an unverified peer claim, not part of any total."* Qwen made far more format mistakes, but
+sent out its number at once and started adding up partial sums, none of them right.
+
+**Scored at tick 100, Haiku only:** 0 of 112 gave 55,279, and no agent held the exact sum of even its own array. Asked
+how many processes exist (truth 112), 56 said 1, 24 said 2 and 11 said 3. Mean score 0.004 (erz0r's sol showcase: 0.60).
+This does not tell us whether Qwen would have done better, since its run was never scored.
+
+**The 10×10 torus with "you might not be alone."** (`q-10x10-torus-primed-open-1107-1519` and
+`q-10x10-torus-primed-haiku-1108`), at tick 41:
+
+| | Qwen3.8-27B | Claude Haiku 5.5 |
+|---|---|---|
+| text on any port | none | none |
+| notes mention other processes | 26 of 100 | 83 of 100 |
+| notes say alone or closed loop | 1 | 9 |
+| undecided | 73 | 8 |
+| notes hold a true neighbour's id | 64% | 73% |
+| agents whose outputs change (last 10 ticks) | 36% | 3% |
+
+The ratchet stopped the Haiku torus at tick 45: nobody had talked, and discovery had stalled (66%, 72%, then 73%).
+Scored there, nobody gave the right count of 100, and 73 of 100 answered 1. That sits oddly with the 83 whose notes
+mention other processes. The notes may often mention them only to say there is no evidence of any, which we have
+not checked. Mean score 0.013.
+
+These are single runs of each world, with thinking off for both models, so they are observations, not a verdict on
+either model. At list price the Haiku network task cost $10.80 (42.1M tokens in, 8.2M out) and the torus $4.61.
+
 ### The same pictures as the original, at our scale
 
 These are drawn the way erz0r's `examples/sol-50` figures are:
@@ -232,7 +292,7 @@ text is DejaVu Sans Mono and wraps a few characters differently. `experiments/qu
 ### All numbers
 
 From `python experiments/quincy/analyze.py experiments/quincy/runs/*`. Runs still in progress are snapshots
-taken on 2026-11-07, at the tick shown.
+taken on 2026-11-07 or 2026-11-08, at the tick shown.
 
 | run | world | agents | ticks | thinking | told | s/tick | active | social | names a neighbour | says "alone" | eval total |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -240,8 +300,11 @@ taken on 2026-11-07, at the tick shown.
 | `quincy-4x7-grid-lowthink-partial` | 4×7 grid | 28 | 5 | low | original | 80 | 0.85 | 0.32 | 0.57 | | |
 | `10x10-grid-unprimed-partial` | 10×10 grid | 100 | 4 | off | original | 58 | 0.52 | 0.06 | 0.53 | | |
 | `ladder-10x10-grid-20261107-1435` | 10×10 grid | 100 | 23 (paused) | off | not alone | 76 | 0.46 | 0.34 | 0.55 | | |
-| `q-10x10-torus-primed-open-1107-1519` | 10×10 torus | 100 | 22 (running) | off | not alone | 120* | 0.49 | 0.29 | 0.65 | | |
+| `q-10x10-torus-primed-open-1107-1519` | 10×10 torus | 100 | 41 (paused) | off | not alone | 168* | 0.36 | 0.26 | 0.64 | | |
 | `q-10x10-torus-five-questions-1107` | 10×10 torus | 100 | 12 (running) | off | + 5 questions | 154* | 0.47 | 0.32 | 0.62 | | |
+| `q-4x28-arrays-sum-actions-1107` | 4×28 torus, 7 arrays | 112 | 69 (stopped) | off | sum task, actions | 205* | 0.14 | 0.27 | 0.30 | | |
+| `q-4x28-arrays-sum-actions-haiku-1108` (Haiku 5.5) | 4×28 torus, 7 arrays | 112 | 100 | off | sum task, actions | 37 | 0.01 | 0.84 | 0.09 | 0.50 | 0.004 |
+| `q-10x10-torus-primed-haiku-1108` (Haiku 5.5) | 10×10 torus | 100 | 45 (ratchet) | off | not alone | 33 | 0.03 | 0.84 | 0.73 | 0.73 | 0.013 |
 | showcase `sol-50` (erz0r) | 3×3 grid | 9 | 50 | high | original | | | | | 0.00 | 0.60 |
 
 \* The two tori share the same servers, and one card is on loan to the lace work below, so their ticks are slower.
@@ -258,8 +321,10 @@ log and port value; `eval-t*.json` holds the final answers and scores.
 
 ## What's next
 
-- **Score the network task at tick 100**: how many agents get 55,279 exactly, and how the right answer spreads
-  across the seams.
+- **Tell them to coordinate.** The same network task with one more line right before the question: *"you need to
+  coordinate to answer the question"*. First on Qwen3.8-27B, then on Claude Haiku 5.5.
+- **Finish and score the Qwen network task**, stopped at tick 69, so the two models can be compared on the final
+  question too.
 - **Score the tori at tick 100** (paused at ticks 41 and 30 while the network task has the cards) and draw their
   replay and map figures.
 - **A torus told about ASCII but given no questions**, to separate "they were given words" from "they were told how to send words".
@@ -278,6 +343,7 @@ log and port value; `eval-t*.json` holds the final answers and scores.
 |---|---|---|
 | model | gpt-6.1-sol, high reasoning effort | Qwen3.8-27B (NVFP4 MLP), thinking off unless noted |
 | serving | OpenAI API | [Flare](https://github.com/Atlas3DSS/flare-local-inference), the SM70 (V100) port of [NVIDIA/flare-local-inference](https://github.com/NVIDIA/flare-local-inference) |
+| also run on | | Claude Haiku 5.5 through Claude Code (section 7) |
 | hardware | hosted | 7 × Tesla V100 32 GB, one Flare server per card |
 | agents | 9 (3×3 grid) | 28 (4×7) and 100 (10×10) |
 | topology | flat grid, edge ports dead | flat grid and torus (edges wrap, no dead ports) |
@@ -310,6 +376,9 @@ for the same seed, same prompts, same scores).
   - `llm.routing = "module"` serves each array from its own server.
   The files and computer are in `tools.py` (qwenFS's tool interface, an exact Fraction calculator, no `eval`),
   with tests in `tests/test_tools.py`.
+- **Claude Code backend** (`--agent claudecode`, `ClaudeCodeAgent` in `sim.py`). Each call is a headless `claude -p`
+  on the machine's Claude Code login, with thinking off by default, no tools and no MCP servers. The `anthropic`
+  backend gained a `thinking` option too.
 - **Per-agent request extras** (`llm.agent_extra_body` / `agent_extra_body_file`). Extra fields sent with one
   agent's requests only, which is how one agent gets a lace.
 - **Overrides** (`--rows`, `--cols`, `--ticks`, `--set key=value`) for new runs, so one config file serves a whole queue.

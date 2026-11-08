@@ -56,6 +56,19 @@ reply), then runs the sim and the eval. Resume a stopped run with `RUN_ID=<id> b
    (optionally wake every k ticks), compared against the every-tick baseline.
 Quincy goes to 768 GB RAM next week: ~650 GB of parked agent state, ~720 agents at ~12K tokens each.
 
+## STOPPED (2026-11-08, owner: fix looping thoughts and run-on replies first)
+Everything below is paused. Stopped: fourfold-queue, fourfold-eval-t100, fourfold-network-sum (ticks.jsonl ends at t69 of
+100; resume with `.venv/bin/python sim.py --resume q-4x28-arrays-sum-actions-1107`), fourfold-flare-0..5, and fabe's
+queued fourfold-gpu-session. The long-memory test had already finished (t20). All 7 V100 leases are released.
+runs/QUEUE still holds its 4 lines. Restart only on the owner's go: servers first (flare_up.sh), then the network-sum resume, then the queue.
+
+## Haiku and coordinate runs (2026-11-08)
+Done on devbox (only devbox has a logged-in Claude Code): q-4x28-arrays-sum-actions-haiku-1108, q-10x10-torus-primed-haiku-1108.
+Waiting for cards: fourfold-coordinate-27b (q-4x28-arrays-sum-coordinate-27b-1108, prime "you need to coordinate to answer
+the question"), servers fourfold-flare-0..6 via quincy/flare_board.sh, which joins the workboard queue directly because
+`sb run --gpu` batch jobs wait outside it while every card is full. When 27B ends: stop the servers, run the same args with
+--agent claudecode as q-4x28-arrays-sum-coordinate-haiku-1108 on devbox, write up, push.
+
 ## State at handoff (2026-11-08 03:15Z / Nov 7 7:15 PM PST)
 Running on Quincy (`sb jobs`):
 - `fourfold-network-sum` → run `q-4x28-arrays-sum-actions-1107`: 112 agents, 7 arrays 4x4, seams every 2 ticks,

@@ -1,0 +1,6 @@
+{"tick": 15, "window": 15, "keep": true, "talkers": 45, "new_messages": 92, "named_start": 0.0, "named_end": 0.045, "exact_sum_start": 0, "exact_sum_end": 0, "talk": true, "discovery": false, "task": false}
+{"tick": 30, "window": 15, "keep": true, "talkers": 56, "new_messages": 130, "named_start": 0.045, "named_end": 0.062, "exact_sum_start": 0, "exact_sum_end": 0, "talk": true, "discovery": false, "task": false}
+{"tick": 45, "window": 15, "keep": true, "talkers": 64, "new_messages": 76, "named_start": 0.062, "named_end": 0.062, "exact_sum_start": 0, "exact_sum_end": 0, "talk": true, "discovery": false, "task": false}
+{"tick": 60, "window": 15, "keep": true, "talkers": 64, "new_messages": 61, "named_start": 0.062, "named_end": 0.071, "exact_sum_start": 0, "exact_sum_end": 0, "talk": true, "discovery": false, "task": false}
+{"tick": 75, "window": 15, "keep": true, "talkers": 64, "new_messages": 49, "named_start": 0.071, "named_end": 0.08, "exact_sum_start": 0, "exact_sum_end": 0, "talk": true, "discovery": false, "task": false}
+{"tick": 90, "window": 15, "keep": true, "talkers": 65, "new_messages": 36, "named_start": 0.08, "named_end": 0.089, "exact_sum_start": 0, "exact_sum_end": 0, "talk": true, "discovery": false, "task": false}
