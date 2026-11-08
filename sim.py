@@ -896,7 +896,12 @@ class ClaudeCodeAgent:
     no session files, a neutral working directory. stateless memory only (one user turn per call)."""
 
     def __init__(self, cfg: dict):
+        import shutil
         self.cfg = cfg
+        # systemd units do not have ~/.local/bin on PATH: resolve the cli once, and stop if it is not there
+        self.bin = shutil.which(cfg["bin"]) or shutil.which(cfg["bin"], path=str(Path.home() / ".local/bin"))
+        if not self.bin:
+            sys.exit(f"claudecode: cannot find the claude cli ({cfg['bin']!r}) on PATH or in ~/.local/bin")
         self.sem = asyncio.Semaphore(int(cfg["max_concurrency"]))
         self.cwd = RUNS / ".claudecode-cwd"
         self.cwd.mkdir(parents=True, exist_ok=True)
@@ -905,7 +910,7 @@ class ClaudeCodeAgent:
             self.env["MAX_THINKING_TOKENS"] = "0"
 
     async def once(self, turn: Turn) -> Reply:
-        cmd = [self.cfg["bin"], "-p", "--model", self.cfg["model"], "--system-prompt", turn.system,
+        cmd = [self.bin, "-p", "--model", self.cfg["model"], "--system-prompt", turn.system,
                "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
                "--no-session-persistence", "--output-format", "json", "--effort", self.cfg["effort"]]
         proc = await asyncio.create_subprocess_exec(
