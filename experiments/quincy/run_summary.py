@@ -357,8 +357,26 @@ def summarize_loaded(run: Path, meta: dict, ticks: list, ev, ratchet: list, note
     if notes.get("note"):
         findings.append(notes["note"])
 
+    asked_s = asked(meta)
+    reg = cfg.get("registers") or {}
+    if reg.get("enabled"):               # a different kind of run: the questions above don't apply to it
+        rows = [r["reg"] for r in ticks if r.get("reg")]
+        events = [e for r in rows for e in r.get("events", [])]
+        count = lambda kind: sum(e["kind"] == kind for e in events)
+        delivered = rows[-1]["delivered"] if rows else 0
+        shown = (ticks[-1]["t"] - 1) // max(1, int(reg.get("input_period", 12))) + 1 if ticks else 0
+        help_bits = [x for x, on in (("told where the input and output are", reg.get("tell_cells")),
+                                     ("shown the wiring", reg.get("show_wiring"))) if on]
+        told_s = ("They have addresses and small registers, and they are told the job. " +
+                  (f"Seam nodes are {' and '.join(help_bits)}." if help_bits else ""))
+        asked_s = "The job: get each value from an input at one spot to an output at another, exactly, while it is still current."
+        verdict = (f"Yes for {delivered} of {shown} values." if delivered else f"Not yet: 0 of {shown} values arrived.")
+        findings = [f"{plural(count('program_trial'), 'instruction')} tried: {count('program_kept')} kept, "
+                    f"{count('program_reverted') + count('program_failed_test')} undone or failed."]
+        if notes.get("note"):
+            findings.append(notes["note"])
     return {
-        "run": run.name, "title": title, "world": world(meta), "told": told_s, "asked": asked(meta),
+        "run": run.name, "title": title, "world": world(meta), "told": told_s, "asked": asked_s,
         "status": st["line"], "state": st["state"], "ticks": st["ticks"], "scored_at": st["scored_at"],
         "verdict": verdict, "findings": findings, "messages": tk["first"],
         "label": f"{title} · {st['line'].split(' (')[0].lower()}",
