@@ -34,17 +34,18 @@ What they actually wrote, decoded from their port values (tick and agent that fi
 
 | tick | agent | on the wire |
 |---|---|---|
-| 1 | 36 | `Hello` |
-| 2 | 45 | `who are you?`  ·  `what are we?` |
-| 2 | 58 | `what are you?`  ·  `who am i?`  ·  `who are we?` |
-| 3 | 53 | `ASK: WHO AM I?` |
-| 4 | 35 | `ANSWER` |
-| 5 | 88 | `where are we?` |
-| 5 | 68 | `process 69a17d8f` |
-| 6 | 22 | `I am a process` |
+| 1 | 37 | `Hello` |
+| 2 | 46 | `who are you?`  ·  `what are we?` |
+| 2 | 59 | `what are you?`  ·  `who am i?`  ·  `who are we?` |
+| 3 | 54 | `ASK: WHO AM I?` |
+| 4 | 36 | `ANSWER` |
+| 5 | 89 | `where are we?` |
+| 5 | 69 | `process 69a17d8f` |
+| 6 | 23 | `I am a process` |
 
-A port holds 32 hex characters (16 bytes), so each message is the ASCII bytes plus zero padding. Agent 45 sent
-`who are you?` as `0000000077686f2061726520796f753f` (padding first), and agent 22 sent `I am a process` as
+Agents are numbered from 1, as in erz0r's README and the scorer. A port holds 32 hex characters (16 bytes), so each
+message is the ASCII bytes plus zero padding. Agent 46 sent
+`who are you?` as `0000000077686f2061726520796f753f` (padding first), and agent 23 sent `I am a process` as
 `4920616d20612070726f636573730000` (padding last). Many early attempts were rejected because the agents
 miscounted the padding (34 hex characters instead of 32). The simulator refuses a value of the wrong length and
 tells the agent why on the next tick.

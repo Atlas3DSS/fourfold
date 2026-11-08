@@ -9,6 +9,7 @@ the simulator accepted are seen here: a value of the wrong length was rejected a
 Per run: agents that wrote text in the first --window ticks (the same window for every run, so runs of
 different lengths compare fairly), agents over the whole run, how many question texts were arriving on inputs
 at the last tick, and the first --show distinct texts with the tick and agent that first sent each.
+Agents are numbered from 1, as in eval.py, view.py and erz0r's README (agent k is index k-1 in ticks.jsonl).
 """
 from __future__ import annotations
 
@@ -47,7 +48,7 @@ def scan(ticks):
                 s = text(v)
                 if s:
                     agents.add(a["agent"])
-                    first.setdefault(s, (t["t"], a["agent"]))
+                    first.setdefault(s, (t["t"], a["agent"] + 1))   # 1-based, like eval.py, view.py and erz0r's README
     return agents, first
 
 
