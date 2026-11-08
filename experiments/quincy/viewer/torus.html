@@ -102,6 +102,9 @@ button.about[aria-expanded="true"] { border-color: var(--hot); color: var(--hot)
 @media (prefers-reduced-motion: reduce) { button.play:hover { background: transparent; } }
 #logo { height: 28px; width: auto; align-self: center; }
 button.fresh { background: var(--hot); color: var(--ink); border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-weight: 500; }
+.banner { margin: 6px 0 10px; padding: 8px 12px; border-left: 3px solid var(--hot); background: color-mix(in srgb, var(--hot) 10%, transparent); font-size: 13px; line-height: 1.4; max-width: 72ch; }
+.banner b { color: var(--hot); }
+.banner a { color: inherit; }
 </style>
 <style id="theme">/*THEME*/</style>
 
@@ -110,6 +113,7 @@ button.fresh { background: var(--hot); color: var(--ink); border: 0; border-radi
 <header class="hud">
   <img id="logo" alt="" hidden>
   <h1>Fourfold Torus</h1>
+  <!--BANNER-->
   <div class="facts" id="facts"></div>
   <select id="dataset" aria-label="Run"></select>
   <button id="about-btn" class="about" aria-expanded="true" aria-controls="about">about this run</button>

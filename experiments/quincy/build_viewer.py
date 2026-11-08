@@ -88,8 +88,10 @@ else:
 
 tpl = (Path(__file__).resolve().parent / "viewer" / "torus.html").read_text(encoding="utf-8")
 blob = json.dumps(sets, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
+banner = notes.get("_banner") if isinstance(notes, dict) else None   # optional site-wide highlight: {"html": "..."} (trusted, hand-written)
+banner_html = f'<p class="banner">{banner["html"]}</p>' if isinstance(banner, dict) and banner.get("html") else ""
 page = (tpl.replace("/*THEME*/", theme).replace("/*BUILT*/0", str(int(time.time())))
-        .replace("/*DATASETS*/", blob))
+        .replace("/*DATASETS*/", blob).replace("<!--BANNER-->", banner_html))
 tmp = out.with_suffix(".tmp")
 tmp.write_text(page, encoding="utf-8")
 tmp.replace(out)
