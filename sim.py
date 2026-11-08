@@ -88,12 +88,23 @@ DEFAULTS = {
         "api_key_env": "ANTHROPIC_API_KEY",
         "base_url": None,
         "effort": "medium",         # low | medium | high | xhigh | max
+        "thinking": "adaptive",     # "adaptive" or "disabled" (haiku 5.5 / opus 5 accept disabled at effort <= high;
+                                    # opus 5.5 and fable reject it)
         "max_tokens": 16000,        # thinking counts toward this
         "fallbacks": "",            # "default" = rerun refused calls on another model. off keeps every
                                     # answer from the configured model; a refused turn writes nothing
         "timeout": 600,
         "retries": 3,
         "max_concurrency": 9,
+    },
+    "claudecode": {                 # each call is a headless `claude -p` on the local claude code login (no api key)
+        "model": "claude-haiku-5-5",
+        "effort": "medium",
+        "thinking": "disabled",     # "disabled" sets MAX_THINKING_TOKENS=0; "adaptive" lets the model think
+        "bin": "claude",
+        "timeout": 300,
+        "retries": 2,
+        "max_concurrency": 20,
     },
     "echo": {"delay": 1, "shift": 1, "beacon_period": 7, "malformed_rate": 0.05},
 }
@@ -830,7 +841,8 @@ class AnthropicAgent:
             max_tokens=int(self.cfg["max_tokens"]),
             system=turn.system,
             messages=[{"role": "user", "content": self.content(turn)}],
-            thinking={"type": "adaptive", "display": "summarized"},
+            thinking=({"type": "disabled"} if self.cfg.get("thinking") == "disabled"
+                      else {"type": "adaptive", "display": "summarized"}),
             output_config={"effort": self.cfg["effort"]},
         )
         betas = []
@@ -879,6 +891,60 @@ class AnthropicAgent:
         await self.client.close()
 
 
+class ClaudeCodeAgent:
+    """one headless `claude -p` per call, on the machine's claude code login: no tools, no mcp, no settings,
+    no session files, a neutral working directory. stateless memory only (one user turn per call)."""
+
+    def __init__(self, cfg: dict):
+        self.cfg = cfg
+        self.sem = asyncio.Semaphore(int(cfg["max_concurrency"]))
+        self.cwd = RUNS / ".claudecode-cwd"
+        self.cwd.mkdir(parents=True, exist_ok=True)
+        self.env = dict(os.environ)
+        if cfg.get("thinking") == "disabled":
+            self.env["MAX_THINKING_TOKENS"] = "0"
+
+    async def once(self, turn: Turn) -> Reply:
+        cmd = [self.cfg["bin"], "-p", "--model", self.cfg["model"], "--system-prompt", turn.system,
+               "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
+               "--no-session-persistence", "--output-format", "json", "--effort", self.cfg["effort"]]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=self.cwd, env=self.env, stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(turn.prompt.encode()), float(self.cfg["timeout"]))
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return Reply(error=f"claude -p timed out after {self.cfg['timeout']}s")
+        try:
+            d = json.loads(out.decode() or "{}")
+        except json.JSONDecodeError:
+            return Reply(error=f"claude -p rc {proc.returncode}: {(err or out).decode()[-300:]}")
+        usage = dict(d.get("usage") or {})
+        usage["cost_usd"] = d.get("total_cost_usd")
+        usage["served_by"] = ",".join((d.get("modelUsage") or {}).keys())
+        rep = Reply(raw=d.get("result") or "", usage=usage, request_id=d.get("session_id"))
+        if d.get("is_error") or proc.returncode:
+            rep.error = f"claude -p error (rc {proc.returncode}): {str(d.get('result') or err.decode())[-300:]}"
+        return rep
+
+    async def act(self, turn: Turn) -> Reply:
+        if turn.images or turn.history:
+            return Reply(error="claudecode backend supports text, stateless memory only")
+        async with self.sem:
+            rep = Reply(error="not run")
+            for attempt in range(int(self.cfg["retries"]) + 1):
+                rep = await self.once(turn)
+                if not rep.error:
+                    return rep
+                await asyncio.sleep(5 * (attempt + 1))
+            return rep
+
+    async def close(self):
+        pass
+
+
 def make_agent(cfg: dict):
     if cfg["agent"] == "echo":
         return EchoAgent(cfg["echo"])
@@ -886,6 +952,8 @@ def make_agent(cfg: dict):
         return LLMAgent(cfg["llm"])
     if cfg["agent"] == "anthropic":
         return AnthropicAgent(cfg["anthropic"])
+    if cfg["agent"] == "claudecode":
+        return ClaudeCodeAgent(cfg["claudecode"])
     sys.exit(f"config: unknown agent kind {cfg['agent']!r}")
 
 
@@ -1212,7 +1280,7 @@ def main():
     ap.add_argument("--ticks", type=int, help="run until this tick number")
     ap.add_argument("--run-id", help="name for a new run")
     ap.add_argument("--resume", metavar="RUN", help="run id or path of a run to continue")
-    ap.add_argument("--agent", choices=["llm", "anthropic", "echo"], help="override agent kind for a new run")
+    ap.add_argument("--agent", choices=["llm", "anthropic", "claudecode", "echo"], help="override agent kind for a new run")
     ap.add_argument("--world-seed", type=int, help="override world seed for a new run")
     ap.add_argument("--rows", type=int, help="override grid rows for a new run")
     ap.add_argument("--cols", type=int, help="override grid cols for a new run")
