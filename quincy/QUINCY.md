@@ -46,3 +46,41 @@ reply), then runs the sim and the eval. Resume a stopped run with `RUN_ID=<id> b
   Both were started before --ticks was recorded in the config: resume them with `--ticks 1000`
   (queue line `resume <id> --ticks 1000`, or `.venv/bin/python sim.py --resume <id> --ticks 1000`).
 - Board: http://127.0.0.1:8820/ and the Neuropedia tab /fourfold.
+
+## Next builds (owner, 2026-11-07), in order
+1. One-island long-memory test `q-4x4-torus-longmemory-test-1107` (16 agents, `memory = "conversation"`): does
+   Flare report cache hits (usage.prompt_tokens_details.cached_tokens), and what is the host-RAM footprint per agent?
+2. Tiered state scheduler: GPU (in flight) / RAM (next waves) / NVMe (`--prefix-cache-disk`, cold), prefetching the next
+   wave during the current one, with a pinned hot set instead of LRU (LRU is worst-case for a fixed cycle).
+3. Event-driven ticking, an opt-in labelled variant: agents with unchanged inputs and no pending results sit out a tick
+   (optionally wake every k ticks), compared against the every-tick baseline.
+Quincy goes to 768 GB RAM next week: ~650 GB of parked agent state, ~720 agents at ~12K tokens each.
+
+## State at handoff (2026-11-08 03:15Z / Nov 7 7:15 PM PST)
+Running on Quincy (`sb jobs`):
+- `fourfold-network-sum` → run `q-4x28-arrays-sum-actions-1107`: 112 agents, 7 arrays 4x4, seams every 2 ticks,
+  sum task (answer 55279), five actions, 100 ticks, ~4 min/tick; tick 15 at 03:00Z → done ~08:45Z, then its eval.
+- `fourfold-longmem-test` → `q-4x4-torus-longmemory-test-1107`: 16 agents, memory=conversation, on 9405, 20 ticks.
+  **Problem: Flare reports 0 cached tokens and ticks slow as history grows (prompt ~6.3K tokens at t7).** Find out
+  why (chat template re-rendering past replies? 512-token checkpoint granularity? eviction under shared load?)
+  before building the tiered scheduler (#321). Owner: any Flare change goes in OUR fork, never the shared Flare tree
+  chemistry uses.
+- `fourfold-queue` (job db6ae3) waits for the network task, then runs runs/QUEUE: resume both tori to 150 with
+  `--ratchet 15`, resume the 10x10 grid, then the ASCII-hint torus. Owner rule: cap 150; every 15 ticks a run must
+  be interesting (sim.interest: talk / discovery / task progress) or it is evicted (reason in runs/<id>/ratchet.jsonl).
+- `fourfold-eval-t100`: scores both tori at tick 100 when they get there.
+- `fourfold-flare-0..5` on ports 9400-9405 (30 h limit from 23:00Z Nov 7). Card GPU-f2b6541e (server 6, port 9406)
+  is lent to fabe-integration: lace package prepare (job fourfold-lace-prepare), then validation on 9410, then the
+  wide-slot measurement (8/16/32 slots per V100 via persona-wide; results → quincy/WIDE-SLOTS.md). When they
+  release the card, bring server 6 back: `HOURS=24 quincy/flare_up.sh` queues all 7, so instead launch only
+  fourfold-flare-6 (copy its sb run line from flare_up.sh with i=6).
+- Lace run (Sun Wukong on one agent): payloads in quincy/payloads/ (fabe), per-agent file via
+  `quincy/lace_request.py payloads.json wukong <agent0based>`; set `--set llm.agent_extra_body_file=<file>`; serve
+  the steering package (flare-steer). Viewer: add {"<run>": <agent0based>} to fourfold-board/trace.json for the
+  influence view.
+Done tonight: public fork https://github.com/Atlas3DSS/fourfold (branch quincy, EXPERIMENTS-QUINCY.md), board
+http://127.0.0.1:8820/ + Neuropedia tab /fourfold (public), share PNG share/fourfold-x.png (+ make_fourfold_x.py).
+Neuropedia: the Fourfold tab lines in experiments/flare/neuropedia/neuropedia_server.py + fourfold.html are
+UNCOMMITTED in that tree, next to the neuropedia agents' own uncommitted Persona Atlas work; leave them for those
+agents to commit by path.
+Work items: #317 (this), #321 tiered scheduler, #322 event-driven ticking, #237 Ripple.
