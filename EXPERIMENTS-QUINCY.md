@@ -351,7 +351,9 @@ log and port value; `eval-t*.json` holds the final answers and scores.
   test will find out why.
 - **Thinking control.** Using a [gradient-free weight edit that reduces overthinking](https://concept.country/research/weight-space-programming)
   on these xhigh runs. In [Neuropedia](https://neuropedia.atlas3dss.com)'s test it cut thinking on hard items by 46%, against
-  17% for a random control, without hurting accuracy, and only where the model already thinks long.
+  17% for a random control, without hurting accuracy, and only where the model already thinks long. Across all items it
+  did not clear its pre-registered control test (24.5% against 18%). Our task thinks far longer than that test did, so we will
+  see how it does here.
 - **Finish and score the Qwen network task**, stopped at tick 69, so the two models can be compared on the final
   question too.
 - **Score the tori at tick 100** (paused at ticks 41 and 30 while the network task has the cards) and draw their
