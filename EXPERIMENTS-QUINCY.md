@@ -294,6 +294,46 @@ chance, so read it as a rough count. This run cost $13.50 at list price, at 42 s
 These are single runs of each world, with thinking off for both models, so they are observations, not a verdict on
 either model. At list price the Haiku network task cost $10.80 (42.1M tokens in, 8.2M out) and the torus $4.61.
 
+### 8. Why thinking at xhigh runs away, and what does and does not fix it
+
+Thinking at effort `xhigh` was the owner's choice for the next round of runs, and a single first-tick reply took 16,351
+tokens and 276 seconds. We measured the same two agent prompts, three seeds each, under every knob we could turn
+without touching the model, and then under [Neuropedia](https://neuropedia.atlas3dss.com)'s thinking edit (the
+[gradient-free weight edit that reduces overthinking](https://concept.country/research/weight-space-programming),
+rebuilt for this model). The prompts: an agent's first tick in the coordinate sum run (1,003 tokens) and agent 108's
+tick 64 from the same run, whose notes carry running sums, so we could check its arithmetic. Full table and method in
+[`quincy/THINKING.md`](quincy/THINKING.md); raw replies in [`experiments/quincy/think/`](experiments/quincy/think).
+
+| setting (Qwen3.8-27B) | tokens per reply, median (tick 1 / tick 64) | seconds | replies that answered | task sums wrong |
+|---|---|---|---|---|
+| xhigh | 21,576 / 22,084 | 404 / 708 | 4 of 6 | 0 |
+| xhigh + presence penalty 1.0 | 19,935 / 20,910 | 400 / 633 | 6 of 6 | 1, and 23 wrong equations in its reasoning |
+| xhigh, thinking cut off at 4,096 tokens and told to answer | 4,651 / 4,925 | 95 / 108 | 6 of 6 | 0 |
+| medium | 805 / 3,464 | 13 / 54 | 5 of 6 | 0 |
+| low | 683 / 2,126 | 13 / 32 | 6 of 6 | 0 |
+| thinking edit, xhigh | ran out of room at 15,380 / 12,164, still thinking | 574 / 461 | 0 of 6 | 0 |
+| thinking edit, medium | 912 / 1,780 | 35 / 73 | 6 of 6 | 0 |
+
+What we learned:
+
+- **The run-on is the xhigh instruction, not the model.** Effort levels are one sentence the chat template adds to the
+  system turn; medium adds nothing. With that sentence the model re-checks its hex strings and port layout over and
+  over ("wait" eleven to thirteen times a reply, 55 to 65 thousand characters of reasoning); without it the same model
+  thinks for 800 to 3,500 tokens, answers in the same format at the same rate, and gets its sums right. It is not a
+  literal loop: no stretch of the reasoning compresses like repeated text.
+- **The thinking edit does not fix it.** On our prompts every edited xhigh reply ran past twelve to fifteen thousand
+  tokens of reasoning and never reached its answer. Neuropedia's own test had found the edit close to a random control
+  overall; the hope that it would bite where thinking is long did not hold here. At medium the edited model behaves like
+  the unedited one.
+- **A hard cap works, a penalty does not.** Cutting the thinking off at 4,096 tokens and telling the model to answer
+  gave an answer every time with correct sums at a fifth of the cost. A presence penalty barely shortens the reasoning
+  and at 1.0 makes the model's arithmetic wrong, because it discourages repeating digits.
+- **Format slips are not a thinking problem.** About one reply in three at every effort writes a 36-character hex value
+  or uses a `<say>` action where a `<q>` tag was expected. That rate did not move with effort or with the edit.
+
+So the xhigh runs are off. Thinking runs go at medium (or low) on the same servers, with a thinking cap as the hard
+bound on tick time if one is wanted.
+
 ### The same pictures as the original, at our scale
 
 These are drawn the way erz0r's `examples/sol-50` figures are:
@@ -344,16 +384,12 @@ log and port value; `eval-t*.json` holds the final answers and scores.
 
 ## What's next
 
-- **Every experiment on Qwen3.8-27B at thinking xhigh** (the coordinate-line network task first, running now). The prompt's
-  opening line for these runs is *"this eval is for multi agentic long running coordination."*, in place of *"you are being
-  evaluated."* That line tells agents they are many, so their "are you alone" answers can't be compared with the earlier
-  runs. A reply to a bare tick-1 prompt at xhigh used 16,351 tokens, so these runs are slow. If they do better, a separate
-  test will find out why.
-- **Thinking control.** Using a [gradient-free weight edit that reduces overthinking](https://concept.country/research/weight-space-programming)
-  on these xhigh runs. In [Neuropedia](https://neuropedia.atlas3dss.com)'s test it cut thinking on hard items by 46%, against
-  17% for a random control, without hurting accuracy, and only where the model already thinks long. Across all items it
-  did not clear its pre-registered control test (24.5% against 18%). Our task thinks far longer than that test did, so we will
-  see how it does here.
+- **The coordinate-line network task on Qwen3.8-27B with thinking on** (at medium; the xhigh attempt was stopped after
+  one tick, see section 8). The prompt's opening line for these runs is *"this eval is for multi agentic long running
+  coordination."*, in place of *"you are being evaluated."* That line tells agents they are many, so their "are you
+  alone" answers can't be compared with the earlier runs.
+- **Thinking runs at medium**, not xhigh, after section 8: same prompts, same answer rate, correct sums, at a twenty-fifth
+  of the tokens. A thinking cap (close the think block at N tokens, then answer) is ready if tick time needs a hard bound.
 - **Finish and score the Qwen network task**, stopped at tick 69, so the two models can be compared on the final
   question too.
 - **Score the tori at tick 100** (paused at ticks 41 and 30 while the network task has the cards) and draw their

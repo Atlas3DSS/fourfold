@@ -1,0 +1,5 @@
+[
+ {"name": "edit-xhigh", "effort": "xhigh", "body": {}},
+ {"name": "edit-xhigh-4k", "effort": "xhigh", "body": {"max_tokens": 4096}},
+ {"name": "edit-medium", "effort": "medium", "body": {}}
+]

@@ -1,0 +1,9 @@
+[
+ {"name": "xhigh", "effort": "xhigh", "body": {}},
+ {"name": "xhigh-pp1", "effort": "xhigh", "body": {"presence_penalty": 1.0}},
+ {"name": "xhigh-pp2", "effort": "xhigh", "body": {"presence_penalty": 2.0}},
+ {"name": "medium", "effort": "medium", "body": {}},
+ {"name": "low", "effort": "low", "body": {}},
+ {"name": "xhigh-budget4k", "effort": "xhigh", "body": {}, "budget": 4096},
+ {"name": "xhigh-budget2k", "effort": "xhigh", "body": {}, "budget": 2048}
+]

@@ -8,3 +8,10 @@ __pycache__/
 # internal hand-off notes (name internal key and project paths): keep out of the public fork
 quincy/LACE-BRIEF.md
 flare-steer-build/
+# thinking-control operator plumbing (names internal hosts and paths): keep out of the public fork
+quincy/think_edit_server.sh
+quincy/think_server.sh
+quincy/fourfold_think_server.py
+quincy/gpu_session.sh
+quincy/prepare_steer.sh
+quincy/think_edit_board.sh
