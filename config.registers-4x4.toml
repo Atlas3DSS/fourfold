@@ -1,0 +1,72 @@
+# registers, text version: 4x4 torus, input at 00, output at 22 (4 hops apart), mixed sizes. see registers.py.
+# the three arms, all from this file:
+#   all 27b, no moves:  python sim.py --config config.registers-4x4.toml --set 'llm.pools=[]'
+#   mixed, no moves:    python sim.py --config config.registers-4x4.toml
+#   mixed, moves:       python sim.py --config config.registers-4x4.toml --set registers.moves=true
+# fake agents, no cards: add  --agent regfake --set registers.tell_cells=true
+# run quincy/reg_copy_test.py on this config first. fix world_seed per comparison set so the arms share a world.
+
+agent = "llm"
+ticks = 60
+rows = 4
+cols = 4
+topology = "torus"
+world_seed = 20261108
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+port_bits = 8                # 2 hex digits, as wide as the public register
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+
+[registers]
+enabled = true
+public_hex = 2
+private_hex = 4
+input_hex = 4                # wider than the public register: at least 2 ticks on the bus per value
+input_period = 12
+input_cell = "00"
+output_cell = "22"
+tell_cells = false
+show_score = true
+moves = false
+move_cooldown = 5
+consent = "veto"
+
+[llm]                        # the 27B servers; the pools below override these per size
+base_url = ["http://127.0.0.1:9400/v1"]    # flare on quincy, through the tunnel job
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "medium"
+
+[[llm.pools]]
+name = "0.8b"
+count = 8
+model = "qwen-0.8b"                        # sglang on devbox
+base_url = ["http://127.0.0.1:9450/v1"]
+max_tokens = 2048
+endpoint_concurrency = 8
+extra_body = {chat_template_kwargs = {enable_thinking = false}}
+
+[[llm.pools]]
+name = "4b"
+count = 6
+model = "qwen-4b"                          # sglang on devbox
+base_url = ["http://127.0.0.1:9451/v1"]
+max_tokens = 2048
+endpoint_concurrency = 8
+extra_body = {chat_template_kwargs = {enable_thinking = false}}
+
+[[llm.pools]]
+name = "27b"
+count = 2

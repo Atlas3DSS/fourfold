@@ -1,0 +1,70 @@
+# registers across two arrays: a 4x8 open grid made of two 4x4 arrays, one seam, 8 of 32 nodes on it. input in the left array, output
+# in the right, so every value has to cross. only seam nodes may write gluon instructions, in their own array. see registers.py.
+# fake agents, no cards: python sim.py --config config.registers-two-arrays.toml --agent regfake --ticks 40
+
+agent = "llm"
+ticks = 150
+rows = 4
+cols = 8
+topology = "grid"
+modules = [4, 4]
+world_seed = 20261108
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+port_bits = 16               # 4 hex digits: a port carries a whole value in one hop, the public register still cannot
+eval_line = "this eval is for multi agentic long running coordination."
+
+[registers]
+enabled = true
+public_hex = 2
+private_hex = 4
+input_hex = 4
+input_period = 12
+input_cell = "00"
+output_cell = "07"
+tell_cells = true            # scaffold for the first rung
+show_wiring = true           # scaffold for the first rung
+show_score = true
+moves = false
+move_cooldown = 5
+consent = "veto"
+programs = true
+probation = 24
+gate = "unit"
+unit_trials = 6
+unit_bar = 0.8
+noise_limit = 0.25
+
+[llm]
+base_url = ["http://127.0.0.1:9400/v1"]
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "medium"
+
+[[llm.pools]]
+name = "0.8b"
+count = 28                   # no 4b until its server is up: 12 of these become 4b then
+role = "gluon"
+model = "qwen-0.8b"
+base_url = ["http://127.0.0.1:9450/v1"]
+max_tokens = 200
+temperature = 0
+endpoint_concurrency = 6
+extra_body = {chat_template_kwargs = {enable_thinking = false}}
+
+[[llm.pools]]
+name = "27b"
+count = 4
+cells = ["13", "23", "14", "24"]   # scaffold for the first rung: on the seam by hand, until moves are on

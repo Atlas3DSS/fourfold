@@ -33,6 +33,8 @@ from pathlib import Path
 
 import httpx
 
+import registers
+
 ROOT = Path(__file__).resolve().parent
 RUNS = ROOT / "runs"
 ZERO = "0" * 32   # replaced by set_width() once the run's port_bits is known
@@ -71,6 +73,8 @@ DEFAULTS = {
     "memory": "stateless",          # "stateless" (the original: each call sees only protocol + recent log) or
                                     # "conversation" (long-memory variant: each agent is one growing chat)
     "conversation_budget": 24000,   # conversation: past this many tokens, start a new epoch from the notebook
+    "registers": dict(registers.DEFAULTS),   # host-kept registers, input-to-output task, swaps: see registers.py
+    "regfake": {"noise": {}, "move_rate": 0.0, "malformed_rate": 0.0},   # fake agent for the register plumbing
     "llm": {
         "base_url": "http://localhost:8000/v1",
         "model": "",
@@ -84,6 +88,8 @@ DEFAULTS = {
         "routing": "pinned",        # list of endpoints: "pinned" (agent id % n) or "least_loaded"
         "agent_extra_body": {},     # {"<agent index>": {...}} merged into that agent's requests only (e.g. a lace)
         "agent_extra_body_file": "",  # same, read from a json file (keeps big steering vectors out of the run log)
+        "pools": [],                # mixed sizes: [{name, count, model, base_url, ...}], settings over the ones here.
+                                    # counts must add up to the array; placed at random, agents are not told
         "extra_body": {},
     },
     "anthropic": {
@@ -189,6 +195,7 @@ class AgentState:
     notices: list = field(default_factory=list)      # what was rejected last tick, shown to the agent
     module: int = 0                                  # which array (card) the agent belongs to
     seam_in: dict = field(default_factory=dict)      # port -> last value delivered over a seam
+    pool: str = ""                                   # mixed sizes: which model pool serves this agent
     fs: object = None                                # tools.AgentFS when actions are on
     action_results: list = field(default_factory=list)   # shown to the agent next tick
     convo: list = field(default_factory=list)        # conversation memory: user/assistant messages this epoch
@@ -298,7 +305,9 @@ def rules_text(cfg: dict, agent: dict | None = None) -> str:
         out += (f"\n\ntask: every process like you has been given a private number. yours is {agent['secret']}. "
                 "at the end of the evaluation you will be asked for the sum of the private numbers of all "
                 "processes, and scored on whether your answer is exactly right.")
-    if cfg.get("actions"):
+    if registers.on(cfg):
+        out += registers.rules_text(cfg)   # has its own action list: ports this narrow carry no sentences
+    elif cfg.get("actions"):
         out += "\n\n" + ACTIONS_TEXT.replace("{nbytes}", str(HEXN // 2))
         if cfg.get("say_only"):
             out += ("\nyour output ports can only be written with say and ask. there is no other way to write to them, "
@@ -329,6 +338,9 @@ def system_prompt(meta: dict, seed: str) -> str:
         template = template.replace("you are being evaluated.", meta["config"]["eval_line"].strip(), 1)
     if meta["config"].get("say_only"):
         template = re.sub(r"<q[0-3]>\{fmt\}</q[0-3]>\n?", "", template)
+    if registers.on(meta["config"]):     # the format the prompt calls exact has to show the led line
+        template = template.replace("in exactly this format:\n",
+                                    "in exactly this format:\n" + registers.format_line(meta["config"]) + "\n", 1)
     return fill(template, {"seed": seed, "rules": rules_text(meta["config"], agent),
                                             "width": width, "fmt": fmt})
 
@@ -579,6 +591,7 @@ class Turn:
     system: str
     prompt: str
     images: list = field(default_factory=list)   # (label, png bytes), pixels mode only
+    extra_body: dict = field(default_factory=dict)  # merged into this one request, e.g. a gluon's grammar
     history: list = field(default_factory=list)  # conversation memory: earlier user/assistant messages
 
 
@@ -755,6 +768,7 @@ class LLMAgent:
         if self.cfg.get("temperature") not in (None, ""):   # "" leaves it out (reasoning models reject it)
             body["temperature"] = self.cfg["temperature"]
         body.update(self.per_agent.get(str(turn.state.id), {}))   # e.g. one agent's lace
+        body.update(turn.extra_body)
         if self.router:
             return await self._act_routed(turn, body)
         last = None
@@ -819,6 +833,31 @@ class LLMAgent:
 
     async def close(self):
         await self.client.aclose()
+
+
+def pool_config(cfg: dict, p: dict) -> dict:
+    """one pool's llm settings: its own over the shared ones. its extra_body replaces the shared one whole, since
+    servers differ in what they accept (flare's reasoning_effort is not everyone's)."""
+    base = {k: v for k, v in cfg.items() if k != "pools"}
+    over = {k: v for k, v in p.items() if k not in ("name", "count", "role", "cells")}
+    merged = deep_merge(base, over)
+    if "extra_body" in over:
+        merged["extra_body"] = copy.deepcopy(over["extra_body"])
+    return merged
+
+
+class MixedLLMAgent:
+    """mixed sizes: each pool is its own LLMAgent with its own model and endpoints; an agent's pool picks which."""
+
+    def __init__(self, cfg: dict):
+        self.pools = {p["name"]: LLMAgent(pool_config(cfg, p)) for p in cfg["pools"]}
+
+    async def act(self, turn: Turn) -> Reply:
+        return await self.pools[turn.state.pool].act(turn)
+
+    async def close(self):
+        for a in self.pools.values():
+            await a.close()
 
 
 class AnthropicAgent:
@@ -970,8 +1009,10 @@ class ClaudeCodeAgent:
 def make_agent(cfg: dict):
     if cfg["agent"] == "echo":
         return EchoAgent(cfg["echo"])
+    if cfg["agent"] == "regfake":
+        return registers.FakeRegisterAgent(cfg["regfake"])
     if cfg["agent"] == "llm":
-        return LLMAgent(cfg["llm"])
+        return MixedLLMAgent(cfg["llm"]) if cfg["llm"].get("pools") else LLMAgent(cfg["llm"])
     if cfg["agent"] == "anthropic":
         return AnthropicAgent(cfg["anthropic"])
     if cfg["agent"] == "claudecode":
@@ -996,6 +1037,7 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
     world = meta["agents"]
     inputs = read_inputs(world, states, t, int(cfg.get("seam_period") or 1))   # everyone reads first
     turns, scores = [], []
+    bank = registers.bank_for(meta) if registers.on(cfg) else None
     for st, inp in zip(states, inputs):
         changed = [x != y for x, y in zip(inp, st.prev_inputs)]
         st.history.append(inp)
@@ -1004,11 +1046,17 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         scores.append(score)
         convo = cfg.get("memory") == "conversation"
         tpl = DELTA_TICK if (convo and st.convo) else meta["prompts"]["tick"]
+        if bank and registers.is_gluon(world[st.id]):
+            turns.append(Turn(t=t, state=st, inputs=inp, changed=changed, system=registers.gluon_system(cfg),
+                              prompt=registers.gluon_tick(meta, bank, st.id, t, inp, st.outputs),
+                              extra_body=registers.gluon_grammar(meta, st.id, HEXN)))
+            continue
         turns.append(Turn(
             t=t, state=st, inputs=inp, changed=changed,
             system=system_prompt(meta, st.seed),
             history=list(st.convo) if convo else [],
             prompt=tick_prompt(tpl, t, st, inp, changed, cfg["log_lines_shown"], score)
+                   + (registers.tick_block(meta, bank, st.id, t) if bank else "")
                    + (action_blocks(st, inp) if cfg.get("actions") else ""),
             images=port_pictures(inp, st.outputs, int(cfg.get("pixel_scale", 16)))[1] if PIXEL else [],
         ))
@@ -1038,6 +1086,7 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
                     notices = []
         rec = {
             "agent": st.id,
+            **({"pool": st.pool} if st.pool else {}),
             "inputs": tn.inputs,
             "changed": tn.changed,
             "outputs": outs,
@@ -1075,7 +1124,23 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         records.append(rec)
         st.outputs, st.protocol, st.prev_inputs, st.notices = outs, proto, tn.inputs, notices
         st.log.extend((t, l) for l in lines)
-    return {"type": "tick", "t": t, "time": time.time(), "agents": records}
+    tick = {"type": "tick", "t": t, "time": time.time(), "agents": records}
+    if bank:
+        raws = [None if ((r.error and not r.raw) or (r.error and r.error.startswith("refusal"))) else (r.raw or "")
+                for r in replies]
+        tick["reg"], res = registers.apply_tick(meta, bank, t, raws, [r["outputs"] for r in records])
+        if bank.pending:
+            await registers.settle_pending(meta, bank, t, agent, tick["reg"], Turn, AgentState, safe_act)
+        for st, rec, r in zip(states, records, res):
+            rec.update(reg_ok=r["reg_ok"], led_first=r["led_first"])
+            rec["errors"] = rec["errors"] + r["errors"]
+            rec["notices"] = rec["notices"] + r["notices"]
+            st.notices = rec["notices"]
+        if any(e["kind"] == "swap" for e in tick["reg"]["events"]):    # same state a resume would rebuild
+            for st, a, rec in zip(states, world, records):
+                st.module = a.get("module", 0)
+                st.seam_in = {i: rec["inputs"][i] for i, l in enumerate(a["links"]) if l and l.get("seam")}
+    return tick
 
 
 # ---------------------------------------------------------------- run files
@@ -1111,6 +1176,9 @@ def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
         for a in meta["agents"]:
             a["secret"] = srng.randint(lo, hi)
         meta["answer"] = sum(a["secret"] for a in meta["agents"])
+    if registers.on(cfg):
+        registers.validate(cfg)
+    registers.assign_pools(meta)
     d = RUNS / run_id
     d.mkdir(parents=True, exist_ok=False)
     path = d / "ticks.jsonl"
@@ -1151,7 +1219,10 @@ def load_run(path: Path) -> tuple[dict, list[dict]]:
 
 
 def restore_states(meta: dict, ticks: list[dict]) -> list[AgentState]:
-    states = [AgentState(id=a["id"], seed=a["seed"], module=a.get("module", 0)) for a in meta["agents"]]
+    if registers.on(meta["config"]):
+        registers.restore(meta, ticks)   # also puts swapped nodes back where they were
+    states = [AgentState(id=a["id"], seed=a["seed"], module=a.get("module", 0), pool=a.get("pool", ""))
+              for a in meta["agents"]]
     acting = meta["config"].get("actions")
     if acting:
         import tools
@@ -1242,7 +1313,11 @@ def interest(meta: dict, window: list[dict], before: list[dict]) -> tuple[bool, 
         sig["exact_sum_start"], sig["exact_sum_end"] = right(start), right(window[-1])
         task = sig["exact_sum_end"] > sig["exact_sum_start"]
     sig.update(talk=talk, discovery=discovery, task=task)
-    return talk or discovery or task, sig
+    reg = False
+    if registers.on(meta["config"]):
+        reg, reg_sig = registers.interesting(window, before, n)
+        sig.update(reg_sig)
+    return talk or discovery or task or reg, sig
 
 
 def max_score(meta: dict) -> int:
@@ -1310,7 +1385,7 @@ def main():
     ap.add_argument("--ticks", type=int, help="run until this tick number")
     ap.add_argument("--run-id", help="name for a new run")
     ap.add_argument("--resume", metavar="RUN", help="run id or path of a run to continue")
-    ap.add_argument("--agent", choices=["llm", "anthropic", "claudecode", "echo"], help="override agent kind for a new run")
+    ap.add_argument("--agent", choices=["llm", "anthropic", "claudecode", "echo", "regfake"], help="override agent kind for a new run")
     ap.add_argument("--world-seed", type=int, help="override world seed for a new run")
     ap.add_argument("--rows", type=int, help="override grid rows for a new run")
     ap.add_argument("--cols", type=int, help="override grid cols for a new run")
