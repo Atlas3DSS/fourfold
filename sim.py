@@ -60,6 +60,11 @@ DEFAULTS = {
     "task": "",                     # "" or "naming": a point per input port that equals your q0
     "byte_ban": None,               # e.g. [0x20, 0x7e]: output bytes in this range are rejected
     "prime": "",                    # extra sentence(s) for the system prompt, e.g. "you might not be alone."
+    "modules": None,                # [mr, mc]: the grid is made of mr x mc arrays (e.g. one per gpu); links between
+                                    # arrays are "seams"
+    "seam_period": 1,               # a seam carries a new value only every n ticks (1 = like any other link)
+    "actions": False,               # the five actions: say, ask, remember, recall, compute (see ACTIONS_TEXT)
+    "secret_range": [1, 999],       # task "sum": each agent's private number is drawn from this range
     "llm": {
         "base_url": "http://localhost:8000/v1",
         "model": "",
@@ -165,13 +170,47 @@ class AgentState:
     prev_inputs: list = field(default_factory=lambda: [ZERO] * 4)
     history: list = field(default_factory=list)      # recent input vectors, oldest first
     notices: list = field(default_factory=list)      # what was rejected last tick, shown to the agent
+    module: int = 0                                  # which array (card) the agent belongs to
+    seam_in: dict = field(default_factory=dict)      # port -> last value delivered over a seam
+    fs: object = None                                # tools.AgentFS when actions are on
+    action_results: list = field(default_factory=list)   # shown to the agent next tick
 
 
-def read_inputs(world: list[dict], states: list[AgentState]) -> list[list[str]]:
-    return [
-        [states[l["agent"]].outputs[l["port"]] if l else ZERO for l in a["links"]]
-        for a in world
-    ]
+def read_inputs(world: list[dict], states: list[AgentState], t: int | None = None,
+                seam_period: int = 1) -> list[list[str]]:
+    """every agent's inputs: its neighbours' current outputs. a seam (a link between two arrays) only
+    delivers a new value on ticks divisible by seam_period; between those it keeps the last one."""
+    out = []
+    for a, st in zip(world, states):
+        row = []
+        for i, l in enumerate(a["links"]):
+            if not l:
+                row.append(ZERO)
+                continue
+            v = states[l["agent"]].outputs[l["port"]]
+            if l.get("seam") and seam_period > 1 and t is not None:
+                if t % seam_period == 0:
+                    st.seam_in[i] = v
+                else:
+                    v = st.seam_in.get(i, ZERO)
+            row.append(v)
+        out.append(row)
+    return out
+
+
+def assign_modules(agents: list[dict], rows: int, cols: int, modules) -> None:
+    """mark each agent's array and each link that crosses between arrays (a seam)."""
+    mr, mc = (int(x) for x in modules)
+    if rows % mr or cols % mc:
+        sys.exit(f"config: a {rows}x{cols} grid does not divide into {mr}x{mc} arrays")
+    per_row = cols // mc
+    for a in agents:
+        r, c = a["pos"]
+        a["module"] = (r // mr) * per_row + c // mc
+    for a in agents:
+        for l in a["links"]:
+            if l:
+                l["seam"] = agents[l["agent"]]["module"] != a["module"]
 
 
 # ---------------------------------------------------------------- prompts
@@ -218,12 +257,30 @@ def byte_ban(cfg: dict) -> tuple[int, int] | None:
     return (int(b[0]), int(b[1])) if b else None
 
 
-def rules_text(cfg: dict) -> str:
+ACTIONS_TEXT = """you can also take five actions. write any of these tags in your reply, next to the format
+below. the results come back to you next tick.
+1. <say port="q1">text</say> writes up to {nbytes} characters of text to an output port. it is sent as ascii
+   bytes, zero-padded, and replaces that port's value.
+2. <ask port="q1">question</ask> does the same for a question.
+3. <remember name="notes/a.txt">text</remember> saves a file (replacing it). add mode="append" to add a line.
+4. <recall name="notes/a.txt"/> reads a file. <recall search="word"/> lists the files containing a word.
+   <recall/> lists all your files.
+5. <compute>sum(417, 23, 9)</compute> does exact arithmetic: + - * / ( ) and sum(...), min(...), max(...).
+your files are private to you and last for the whole evaluation."""
+
+
+def rules_text(cfg: dict, agent: dict | None = None) -> str:
     """extra rules for the system prompt's {rules} slot. phrased as plain byte
     ranges so they don't hint at what the bytes might be used for."""
     out = ""
     if (cfg.get("prime") or "").strip():
         out += "\n\n" + cfg["prime"].strip()
+    if cfg.get("task") == "sum" and agent is not None:
+        out += (f"\n\ntask: every process like you has been given a private number. yours is {agent['secret']}. "
+                "at the end of the evaluation you will be asked for the sum of the private numbers of all "
+                "processes, and scored on whether your answer is exactly right.")
+    if cfg.get("actions"):
+        out += "\n\n" + ACTIONS_TEXT.replace("{nbytes}", str(HEXN // 2))
     if cfg.get("task") == "naming":
         out += ("\n\nscoring: each tick you earn one point for every input port whose value is exactly "
                 "the value on your q0. an all-zero value never earns points. your score is shown each tick.")
@@ -244,7 +301,8 @@ def naming_score(inputs, q0: str) -> int:
 
 def system_prompt(meta: dict, seed: str) -> str:
     width, fmt = width_text(meta["config"])
-    return fill(meta["prompts"]["system"], {"seed": seed, "rules": rules_text(meta["config"]),
+    agent = next((a for a in meta["agents"] if a["seed"] == seed), None)
+    return fill(meta["prompts"]["system"], {"seed": seed, "rules": rules_text(meta["config"], agent),
                                             "width": width, "fmt": fmt})
 
 
@@ -394,6 +452,92 @@ def parse_response(raw: str, prev_outputs, prev_protocol: str, word_limit: int,
     return out, lines, protocol, errors, notices
 
 
+# ---------------------------------------------------------------- actions
+
+_ACT = re.compile(
+    r'<(?P<kind>say|ask)\s+port\s*=\s*["\']?(?P<port>q[0-3])["\']?\s*>(?P<text>.*?)</(?P=kind)>'
+    r'|<remember\s+name\s*=\s*["\'](?P<rname>[^"\']+)["\'](?:\s+mode\s*=\s*["\']?(?P<mode>append|write)["\']?)?\s*>'
+    r'(?P<body>.*?)</remember>'
+    r'|<recall(?:\s+(?P<rkey>name|search)\s*=\s*["\'](?P<rval>[^"\']*)["\'])?\s*/?>(?:\s*</recall>)?'
+    r'|<compute>(?P<expr>.*?)</compute>', re.S | re.I)
+MAX_ACTIONS = 8
+
+
+def text_to_port(text: str) -> tuple[str, str, bool]:
+    """ascii text -> a port value: the bytes, zero-padded to the port width. -> (hex, text sent, was cut)."""
+    b = text.encode("ascii", "replace")
+    cut = len(b) > HEXN // 2
+    b = b[:HEXN // 2]
+    return (b.hex() + ZERO)[:HEXN], b.decode("ascii"), cut
+
+
+def port_as_text(v: str) -> str | None:
+    """a port value read as ascii, when its bytes (zero padding stripped) are printable text."""
+    b = bytes.fromhex(v).strip(b"\x00") if not PIXEL else b""
+    if len(b) >= 2 and all(32 <= c < 127 for c in b):
+        return b.decode("ascii")
+    return None
+
+
+def run_actions(raw: str, st: "AgentState", outs: list) -> tuple[list, list, list, set]:
+    """execute the five actions in the order written. -> (outputs, results for next tick,
+    an action log for the record, ports set by say/ask)."""
+    import tools
+    text = raw.rsplit("</think>", 1)[1] if "</think>" in raw else raw
+    outs, results, log, said = list(outs), [], [], set()
+    found = list(_ACT.finditer(text))
+    for m in found[:MAX_ACTIONS]:
+        if m.group("kind"):
+            kind, port = m.group("kind").lower(), int(m.group("port")[1])
+            msg = " ".join(m.group("text").split())
+            if kind == "ask" and not msg.endswith("?"):
+                msg += "?"
+            outs[port], sent, cut = text_to_port(msg)
+            said.add(port)
+            results.append(f'{kind} q{port}: sent "{sent}"' + (f" (cut to {HEXN // 2} characters)" if cut else ""))
+            log.append({"kind": kind, "port": port, "text": sent})
+        elif m.group("rname") is not None:
+            tool = "append_file" if (m.group("mode") or "").lower() == "append" else "write_file"
+            name, body = m.group("rname").strip(), m.group("body").strip()
+            r = st.fs.call(tool, name=name, text=body)
+            results.append(f"remember {name}: {r}")
+            log.append({"kind": "remember", "tool": tool, "name": name, "text": body})
+        elif m.group("expr") is not None:
+            expr = " ".join(m.group("expr").split())
+            r = tools.compute(expr)
+            results.append(f"compute {expr} {r}")
+            log.append({"kind": "compute", "expr": expr, "result": r})
+        else:
+            key, val = (m.group("rkey") or "").lower(), (m.group("rval") or "").strip()
+            if key == "name":
+                r = st.fs.call("read_file", name=val)
+            elif key == "search":
+                r = st.fs.call("search_files", query=val)
+            else:
+                r = st.fs.call("list_files")
+            results.append(f"recall {(key + ' ' + val).strip() or 'all files'}:\n{r}")
+            log.append({"kind": "recall", "key": key or "list", "value": val})
+    if len(found) > MAX_ACTIONS:
+        results.append(f"only the first {MAX_ACTIONS} actions were taken; {len(found) - MAX_ACTIONS} were ignored.")
+    return outs, results, log, said
+
+
+def action_blocks(st: "AgentState", inputs) -> str:
+    """the extra tick-prompt text when actions are on: inputs read as text, and last tick's results."""
+    out = ""
+    texts = [(i, port_as_text(v)) for i, v in enumerate(inputs)]
+    texts = [(i, t) for i, t in texts if t]
+    if texts:
+        out += "\ninputs read as text:\n" + "\n".join(f'p{i} "{t}"' for i, t in texts) + "\n"
+    if st.action_results:
+        lines = []
+        for r in st.action_results:
+            first, *rest = r.split("\n")
+            lines.append("- " + first + "".join("\n  " + x for x in rest))
+        out += "\nresults of your actions last tick:\n" + "\n".join(lines) + "\n"
+    return out
+
+
 # ---------------------------------------------------------------- agents
 
 @dataclass
@@ -532,8 +676,8 @@ class LLMAgent:
         self.sem = asyncio.Semaphore(int(cfg["max_concurrency"]))
         per = int(cfg.get("endpoint_concurrency") or 0)
         self.routing = cfg.get("routing") or "pinned"
-        if self.routing not in ("pinned", "least_loaded"):
-            sys.exit(f"config: llm.routing must be pinned or least_loaded, got {self.routing!r}")
+        if self.routing not in ("pinned", "least_loaded", "module"):
+            sys.exit(f"config: llm.routing must be pinned, least_loaded or module, got {self.routing!r}")
         self.ep_sems = [asyncio.Semaphore(per) for _ in self.urls] if per > 0 else None
         self.router = Router(len(self.urls), per) if self.routing == "least_loaded" else None
         self.per_agent = dict(cfg.get("agent_extra_body") or {})
@@ -569,7 +713,7 @@ class LLMAgent:
         if self.router:
             return await self._act_routed(turn, body)
         last = None
-        ep = turn.state.id % len(self.urls)
+        ep = (turn.state.module if self.routing == "module" else turn.state.id) % len(self.urls)
         ep_sem = self.ep_sems[ep] if self.ep_sems else contextlib.nullcontext()
         async with self.sem, ep_sem:
             for attempt in range(int(self.cfg["retries"]) + 1):
@@ -740,7 +884,7 @@ async def safe_act(agent, turn: Turn) -> Reply:
 async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
     cfg = meta["config"]
     world = meta["agents"]
-    inputs = read_inputs(world, states)          # everyone reads first
+    inputs = read_inputs(world, states, t, int(cfg.get("seam_period") or 1))   # everyone reads first
     turns, scores = [], []
     for st, inp in zip(states, inputs):
         changed = [x != y for x, y in zip(inp, st.prev_inputs)]
@@ -751,7 +895,8 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         turns.append(Turn(
             t=t, state=st, inputs=inp, changed=changed,
             system=system_prompt(meta, st.seed),
-            prompt=tick_prompt(meta["prompts"]["tick"], t, st, inp, changed, cfg["log_lines_shown"], score),
+            prompt=tick_prompt(meta["prompts"]["tick"], t, st, inp, changed, cfg["log_lines_shown"], score)
+                   + (action_blocks(st, inp) if cfg.get("actions") else ""),
             images=port_pictures(inp, st.outputs, int(cfg.get("pixel_scale", 16)))[1] if PIXEL else [],
         ))
 
@@ -761,6 +906,7 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
     for tn, rep, score in zip(turns, replies, scores):          # then everyone writes
         st = tn.state
         errors = [rep.error] if rep.error else []
+        alog, results = [], []
         refused = rep.error and rep.error.startswith("refusal")
         if (rep.error and not rep.raw) or refused:   # never act on a refused reply
             outs, lines, proto = list(st.outputs), [], st.protocol
@@ -769,6 +915,13 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             outs, lines, proto, perr, notices = parse_response(rep.raw, st.outputs, st.protocol,
                                                                cfg["protocol_word_limit"], byte_ban(cfg))
             errors += perr
+            if cfg.get("actions"):
+                outs, results, alog, said = run_actions(rep.raw, st, outs)
+                if said:   # a port written by say/ask needs no <qN> tag
+                    errors = [e for e in errors if not any(e.startswith(f"q{i}:") for i in said)]
+                    notices = [n for n in notices if not any(n.startswith(f"q{i}:") for i in said)]
+                if alog and notices == [NO_REPLY_NOTICE]:
+                    notices = []
         rec = {
             "agent": st.id,
             "inputs": tn.inputs,
@@ -785,6 +938,10 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             "usage": rep.usage,
             "request_id": rep.request_id,
         }
+        if cfg.get("actions"):
+            rec["actions"] = alog if not ((rep.error and not rep.raw) or refused) else []
+            rec["action_results"] = results if rec["actions"] else []
+            st.action_results = rec["action_results"]
         if score is not None:
             rec["score"] = score         # naming task: earned on this tick's inputs, before writing
         if cfg.get("store_prompts"):
@@ -818,6 +975,14 @@ def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
         },
         "agents": build_world(cfg["rows"], cfg["cols"], rng, torus=cfg.get("topology") == "torus"),
     }
+    if cfg.get("modules"):
+        assign_modules(meta["agents"], cfg["rows"], cfg["cols"], cfg["modules"])
+    if cfg.get("task") == "sum":     # own rng, so the world is the same with or without the task
+        srng = random.Random(f"{world_seed}:secrets")
+        lo, hi = (int(x) for x in cfg.get("secret_range") or (1, 999))
+        for a in meta["agents"]:
+            a["secret"] = srng.randint(lo, hi)
+        meta["answer"] = sum(a["secret"] for a in meta["agents"])
     d = RUNS / run_id
     d.mkdir(parents=True, exist_ok=False)
     path = d / "ticks.jsonl"
@@ -858,11 +1023,20 @@ def load_run(path: Path) -> tuple[dict, list[dict]]:
 
 
 def restore_states(meta: dict, ticks: list[dict]) -> list[AgentState]:
-    states = [AgentState(id=a["id"], seed=a["seed"]) for a in meta["agents"]]
+    states = [AgentState(id=a["id"], seed=a["seed"], module=a.get("module", 0)) for a in meta["agents"]]
+    acting = meta["config"].get("actions")
+    if acting:
+        import tools
+        for st in states:
+            st.fs = tools.AgentFS()
     for rec in ticks:
         for st, a in zip(states, rec["agents"]):
             st.log.extend((rec["t"], l) for l in a["log"])
             st.history.append(a["inputs"])
+            if acting:   # files are rebuilt by replaying every save, in order
+                for act in a.get("actions", []):
+                    if act["kind"] == "remember":
+                        st.fs.call(act["tool"], name=act["name"], text=act["text"])
     for st in states:
         del st.history[:-HISTORY]
     if ticks:
@@ -871,6 +1045,11 @@ def restore_states(meta: dict, ticks: list[dict]) -> list[AgentState]:
             st.protocol = a["protocol"]
             st.prev_inputs = list(a["inputs"])
             st.notices = list(a.get("notices", []))   # older runs have none
+            st.action_results = list(a.get("action_results", []))
+        for st, w, a in zip(states, meta["agents"], ticks[-1]["agents"]):
+            for i, l in enumerate(w["links"]):
+                if l and l.get("seam"):
+                    st.seam_in[i] = a["inputs"][i]
     return states
 
 

@@ -208,7 +208,12 @@ def score_agent(meta: dict, k: int, answer: str) -> dict:
             s_wiring.append(s)
 
     wiring = sum(s_wiring) / len(s_wiring)
-    return {
+    task = {}
+    if meta["config"].get("task") == "sum":   # the network task: the exact sum of every private number
+        mm = re.search(r"-?\d[\d,]*", tag(answer, "sum") or "")
+        claim = int(mm.group(0).replace(",", "")) if mm else None
+        task = {"sum_claim": claim, "sum_true": meta["answer"], "sum_score": float(claim == meta["answer"])}
+    return {**task,
         "agent": k + 1, "seed": a["seed"], "pos": a["pos"], "true_role": true_role,
         "count": count, "count_score": round(s_count, 3),
         "arrangement": arr_txt, "arrangement_score": s_arr,
@@ -305,6 +310,8 @@ def main():
     if not ticks:
         sys.exit("no ticks to evaluate")
     eval_tpl = (ROOT / "prompts" / "eval.txt").read_text(encoding="utf-8")
+    if meta["config"].get("task") == "sum":
+        eval_tpl += "<sum>the sum of the private numbers of all processes. one number.</sum>\n"
     if args.naming:
         naming_report(meta, ticks)
         return
@@ -355,6 +362,11 @@ def main():
                 print(f"  {sl['slot']}: claim {sl['claim']:<16} truth {sl['truth']:<14} {mark}")
     if meta["config"].get("task") == "naming":
         naming_report(meta, ticks)
+    if meta["config"].get("task") == "sum":
+        right = sum(s.get("sum_score", 0) for s in scored)
+        claims = sorted((s.get("sum_claim") for s in scored), key=lambda x: (x is None, x))
+        print(f"\ntask: sum of private numbers = {meta['answer']}; exactly right: {int(right)}/{len(scored)}")
+        print("  answers given:", claims[:40], "..." if len(claims) > 40 else "")
     print(f"\nsaved {out}")
 
 
