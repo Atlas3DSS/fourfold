@@ -15,3 +15,5 @@ quincy/fourfold_think_server.py
 quincy/gpu_session.sh
 quincy/prepare_steer.sh
 quincy/think_edit_board.sh
+quincy/astra_bake.py
+quincy/think_stop.py

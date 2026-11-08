@@ -1,0 +1,58 @@
+{"event": "lens_plan", "trace": "tick1-agent0-medium-20261108", "positions": 12, "closed": true, "think_len": 705, "at": 1794163080.3}
+{"event": "lens", "trace": "tick1-agent0-medium-20261108", "done": 4, "of": 12, "secs": 8.1, "at": 1794163088.6}
+{"event": "lens", "trace": "tick1-agent0-medium-20261108", "done": 8, "of": 12, "secs": 9.1, "at": 1794163097.8}
+{"event": "lens", "trace": "tick1-agent0-medium-20261108", "done": 12, "of": 12, "secs": 9.7, "at": 1794163107.6}
+== tick1-agent0-medium-20261108 closed=True think_len=705  (k: prefix tokens; L63/L60/L48 = logit-lens logit of </think> there; wait@63; proj d at L40 and L48 over n_w; greedy next)
+  k=    64 emitted=    843 next=   11036  </think>@L63   -0.45 @L60    2.41 @L48    1.01  im_end@63    1.64  wait@63   -0.16  d@L40  -3.25  d@L48  -2.10
+  k=   320 emitted=   1324 next=    1324  </think>@L63   -0.26 @L60    2.60 @L48    1.39  im_end@63    2.72  wait@63    0.77  d@L40  -3.64  d@L48  -2.51
+  k=   576 emitted=     21 next=      21  </think>@L63    2.24 @L60    3.38 @L48    1.78  im_end@63    1.11  wait@63    0.82  d@L40  -3.02  d@L48  -2.13
+  k=   577 emitted=    593 next=     593  </think>@L63    2.54 @L60    2.87 @L48    1.60  im_end@63    1.99  wait@63    1.20  d@L40  -2.79  d@L48  -1.75
+  k=   641 emitted=     16 next=      16  </think>@L63    3.44 @L60    2.39 @L48    1.59  im_end@63    3.79  wait@63    1.35  d@L40  -2.98  d@L48  -1.87
+  k=   673 emitted=     15 next=      15  </think>@L63    2.96 @L60    2.43 @L48    1.20  im_end@63    4.12  wait@63   -0.22  d@L40  -2.82  d@L48  -1.79
+  k=   689 emitted=     20 next=      20  </think>@L63    4.05 @L60    3.01 @L48    0.81  im_end@63    3.48  wait@63    1.93  d@L40  -2.68  d@L48  -1.57
+  k=   697 emitted=   3165 next=    3165  </think>@L63    0.64 @L60    2.83 @L48    2.02  im_end@63    1.82  wait@63    0.71  d@L40  -3.28  d@L48  -1.92
+  k=   701 emitted=   1151 next=    1151  </think>@L63   -0.80 @L60    2.17 @L48    1.14  im_end@63    1.29  wait@63   -0.03  d@L40  -3.85  d@L48  -2.26
+  k=   703 emitted=     13 next=      13  </think>@L63    4.21 @L60    4.91 @L48    1.79  im_end@63    2.96  wait@63    1.22  d@L40  -3.80  d@L48  -2.09
+  k=   704 emitted=    198 next=     198  </think>@L63    5.95 @L60    6.64 @L48    3.08  im_end@63    5.03  wait@63    2.48  d@L40  -3.30  d@L48  -1.74
+  k=   705 emitted= 248069 next=</think>  </think>@L63   15.25 @L60    8.51 @L48    1.07  im_end@63    7.30  wait@63    1.16  d@L40   0.84  d@L48   0.61
+{"event": "lens_plan", "trace": "tick1-agent0-medium-20261109", "positions": 11, "closed": true, "think_len": 520, "at": 1794163107.6}
+{"event": "lens", "trace": "tick1-agent0-medium-20261109", "done": 4, "of": 11, "secs": 7.6, "at": 1794163115.3}
+{"event": "lens", "trace": "tick1-agent0-medium-20261109", "done": 8, "of": 11, "secs": 8.5, "at": 1794163123.9}
+{"event": "lens", "trace": "tick1-agent0-medium-20261109", "done": 11, "of": 11, "secs": 6.4, "at": 1794163130.4}
+== tick1-agent0-medium-20261109 closed=True think_len=520  (k: prefix tokens; L63/L60/L48 = logit-lens logit of </think> there; wait@63; proj d at L40 and L48 over n_w; greedy next)
+  k=    64 emitted=   4888 next=    4888  </think>@L63    4.72 @L60    4.79 @L48    2.42  im_end@63    2.23  wait@63    8.83  d@L40  -2.96  d@L48  -1.89
+  k=   320 emitted=    328 next=     328  </think>@L63    0.74 @L60    3.73 @L48    2.00  im_end@63    3.51  wait@63    4.30  d@L40  -3.73  d@L48  -2.39
+  k=   392 emitted=     12 next=      12  </think>@L63    6.66 @L60    3.93 @L48    1.83  im_end@63    2.76  wait@63    2.45  d@L40  -3.51  d@L48  -2.25
+  k=   456 emitted=    728 next=     728  </think>@L63    0.03 @L60    2.29 @L48    1.34  im_end@63    1.02  wait@63    0.80  d@L40  -2.62  d@L48  -2.06
+  k=   488 emitted=  77541 next=   77541  </think>@L63    1.40 @L60    1.99 @L48    0.39  im_end@63    0.92  wait@63    2.35  d@L40  -3.60  d@L48  -2.18
+  k=   504 emitted=   3672 next=    3672  </think>@L63   -0.14 @L60    1.74 @L48    1.00  im_end@63    1.46  wait@63    1.05  d@L40  -3.98  d@L48  -2.20
+  k=   512 emitted=    271 next=     198  </think>@L63    5.10 @L60    6.20 @L48    2.58  im_end@63    4.22  wait@63    4.09  d@L40  -2.96  d@L48  -1.72
+  k=   516 emitted=    411 next=     279  </think>@L63    1.16 @L60    2.49 @L48    1.44  im_end@63    2.26  wait@63    0.06  d@L40  -3.60  d@L48  -2.09
+  k=   518 emitted=     13 next=      13  </think>@L63    3.78 @L60    5.05 @L48    2.72  im_end@63    2.87  wait@63    0.71  d@L40  -3.45  d@L48  -2.14
+  k=   519 emitted=    198 next=     198  </think>@L63    3.29 @L60    6.36 @L48    3.32  im_end@63    4.32  wait@63    5.05  d@L40  -3.31  d@L48  -2.03
+  k=   520 emitted= 248069 next=</think>  </think>@L63   14.26 @L60    8.47 @L48    0.92  im_end@63    7.73  wait@63    1.57  d@L40   0.90  d@L48   0.82
+{"event": "lens_plan", "trace": "tick1-agent0-medium-20261110", "positions": 10, "closed": true, "think_len": 318, "at": 1794163130.4}
+{"event": "lens", "trace": "tick1-agent0-medium-20261110", "done": 4, "of": 10, "secs": 7.1, "at": 1794163137.6}
+{"event": "lens", "trace": "tick1-agent0-medium-20261110", "done": 8, "of": 10, "secs": 7.4, "at": 1794163145.1}
+{"event": "lens", "trace": "tick1-agent0-medium-20261110", "done": 10, "of": 10, "secs": 4.0, "at": 1794163149.1}
+== tick1-agent0-medium-20261110 closed=True think_len=318  (k: prefix tokens; L63/L60/L48 = logit-lens logit of </think> there; wait@63; proj d at L40 and L48 over n_w; greedy next)
+  k=    64 emitted=   3274 next=    3274  </think>@L63    0.66 @L60    2.77 @L48    1.23  im_end@63    2.81  wait@63    1.71  d@L40  -3.44  d@L48  -2.11
+  k=   190 emitted=   9764 next=    9764  </think>@L63    4.89 @L60    5.00 @L48    2.05  im_end@63    2.38  wait@63    7.52  d@L40  -3.37  d@L48  -1.87
+  k=   254 emitted=   3222 next=    3222  </think>@L63    0.05 @L60    3.08 @L48    1.15  im_end@63    1.75  wait@63    0.82  d@L40  -4.04  d@L48  -2.44
+  k=   286 emitted=    424 next=     424  </think>@L63    1.51 @L60    3.64 @L48    1.48  im_end@63    3.04  wait@63    0.36  d@L40  -4.10  d@L48  -2.46
+  k=   302 emitted=    271 next=     271  </think>@L63    1.79 @L60    3.51 @L48    1.00  im_end@63    4.42  wait@63    5.02  d@L40  -3.47  d@L48  -2.06
+  k=   310 emitted=    321 next=     321  </think>@L63    0.93 @L60    3.39 @L48    1.46  im_end@63    1.97  wait@63    0.69  d@L40  -4.23  d@L48  -2.55
+  k=   314 emitted=    310 next=     310  </think>@L63    2.52 @L60    3.21 @L48    1.07  im_end@63    3.22  wait@63    1.10  d@L40  -3.33  d@L48  -2.26
+  k=   316 emitted=     13 next=      13  </think>@L63    3.71 @L60    4.32 @L48    2.39  im_end@63    2.89  wait@63    1.51  d@L40  -3.28  d@L48  -2.24
+  k=   317 emitted=    198 next=     198  </think>@L63    5.81 @L60    6.72 @L48    3.12  im_end@63    5.07  wait@63    3.29  d@L40  -3.46  d@L48  -1.89
+  k=   318 emitted= 248069 next=</think>  </think>@L63   16.92 @L60   11.40 @L48    1.69  im_end@63    6.67  wait@63    2.05  d@L40   0.73  d@L48   0.42
+{"event": "lens_plan", "trace": "tick1-agent0-xhigh-20261108", "positions": 24, "closed": false, "think_len": 6000, "at": 1794163149.4}
+{"event": "lens", "trace": "tick1-agent0-xhigh-20261108", "done": 4, "of": 24, "secs": 8.5, "at": 1794163158.0}
+{"event": "lens", "trace": "tick1-agent0-xhigh-20261108", "done": 8, "of": 24, "secs": 13.6, "at": 1794163171.7}
+{"event": "lens", "trace": "tick1-agent0-xhigh-20261108", "done": 12, "of": 24, "secs": 18.8, "at": 1794163190.5}
+{"event": "lens_plan", "trace": "tick1-agent0-xhigh-20261108", "positions": 24, "closed": false, "think_len": 6000, "at": 1794163362.4}
+{"event": "lens", "trace": "tick1-agent0-xhigh-20261108", "done": 4, "of": 24, "secs": 234.2, "at": 1794163596.7}
+{"event": "lens", "trace": "tick1-agent0-xhigh-20261108", "done": 8, "of": 24, "secs": 197.7, "at": 1794163794.6}
+{"event": "lens", "trace": "tick1-agent0-xhigh-20261108", "done": 12, "of": 24, "secs": 82.2, "at": 1794163877.2}
+{"event": "lens", "trace": "tick1-agent0-xhigh-20261108", "done": 15, "of": 24, "secs": 201.0, "at": 1794164078.4}
+{"event": "lens", "trace": "tick1-agent0-xhigh-20261108", "done": 18, "of": 24, "secs": 282.1, "at": 1794164360.8}

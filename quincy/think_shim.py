@@ -16,6 +16,25 @@ plain chat completions with `reasoning_effort` in the body, so this shim:
 import argparse, json, math, os, sys, threading, time, urllib.request, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+END_THINK, IM_END, EOT, IM_START, THINK = 248069, 248046, 248044, 248045, 248068
+
+
+def pulse_program(kind, alpha, direction, astra=''):
+    """The stop pulse: a push along the think direction (concept_cc think.npz, residual sites L32-48, alpha in n_w units) or along
+    Astra-Stop's </think> direction at layer 63 (alpha in residual units). Phase decode: only generated positions are pushed."""
+    import numpy as np
+    sites = []
+    if kind == 'd':
+        Z = np.load(direction)
+        for j, L in enumerate(Z['layers'].tolist()):
+            d = Z['d'][j] / np.linalg.norm(Z['d'][j]); sites.append(dict(site=f'layers.{L}.residual', vector=(d * alpha * float(Z['n_w'][j])).astype(np.float32).tolist()))
+    elif kind == 'astra':
+        u = np.load(astra, allow_pickle=False).astype(np.float64); u /= np.linalg.norm(u)
+        sites.append(dict(site='layers.63.residual', vector=(u * alpha).astype(np.float32).tolist()))
+    else:
+        raise ValueError(kind)
+    return dict(phase='decode', sites=sites)
+
 EFFORTS = ('xhigh', 'medium', 'low')
 PASS = ('seed', 'temperature', 'top_p', 'top_k', 'min_p', 'repetition_penalty', 'presence_penalty', 'frequency_penalty', 'steering')
 
@@ -40,6 +59,12 @@ class Shim:
         self.cap = (d['flare'].get('batch', {}).get('thinking') or {}).get('fourfold_max_tokens') or 4096
         self.lock = threading.Condition(); self.pending = []; self.busy = False
         self.log = open(a.log, 'a') if a.log else None
+        self.program = json.load(open(a.program)) if a.program else None   # {"steering": {...}, "split": "think"|"window", "window_start": N}
+        if self.program:
+            print(json.dumps({'event': 'program', 'sites': len(self.program.get('steering', {}).get('sites', [])), 'split': self.program.get('split'), 'window_start': self.program.get('window_start')}), flush=True)
+        self.pulse = pulse_program(a.pulse_kind, a.pulse_alpha, a.direction, a.astra) if a.pulse_at else None
+        if self.pulse:
+            print(json.dumps({'event': 'pulse', 'at': a.pulse_at, 'kind': a.pulse_kind, 'alpha': a.pulse_alpha, 'tokens': a.pulse_tokens, 'answer_tokens': a.answer_tokens}), flush=True)
         self.tok = None
         if a.tokenizer:   # exact prompt token counts, so budgets are trimmed to the page pool before the engine refuses them
             from transformers import AutoTokenizer
@@ -88,12 +113,16 @@ class Shim:
             r['_prompt_tokens'] = n
             if r['max_tokens'] > allowed:
                 r['_trimmed_from'] = r['max_tokens']; r['max_tokens'] = allowed
+            if '_window_start' in r:   # the gated push: on from prompt + start, to the end of the reply
+                r['think']['window'] = [n + r.pop('_window_start'), n + r['max_tokens']]
 
     def translate(self, body):
         msgs = [{'role': m['role'], 'content': m['content'] if isinstance(m['content'], str) else ''.join(p.get('text', '') for p in m['content'])} for m in body['messages']]
         req = {'model': self.model_id, 'messages': msgs, 'stream': False, 'metadata': {'job_id': 'fourfold-' + uuid.uuid4().hex[:12]}}
         mt = body.get('max_tokens') or body.get('max_completion_tokens') or 2048
         req['max_tokens'] = int(min(int(mt), self.cap))
+        if self.a.pulse_at and body.get('reasoning_effort', self.a.effort) != 'off':
+            req['max_tokens'] = min(req['max_tokens'], int(self.a.pulse_at))
         for k in PASS:
             if body.get(k) is not None:
                 req[k] = body[k]
@@ -108,7 +137,77 @@ class Shim:
             if effort not in EFFORTS:
                 raise ValueError(f'reasoning_effort must be one of {EFFORTS}')
             req['think'] = {'effort': effort}
+            if self.program and 'steering' not in req and not body.get('no_program'):
+                req['steering'] = self.program['steering']
+                if self.program.get('split') == 'think':
+                    req['think']['split'] = 'think'
+                elif self.program.get('split') == 'window':
+                    req['think']['split'] = 'window'; req['_window_start'] = int(self.program.get('window_start', 2048))
         return req
+
+    def ids_of(self, item):
+        """The engine's generated token ids for one result (from its activation artifact)."""
+        import numpy as np
+        p = (item['response'].get('activation_artifact') or {}).get('path')
+        with np.load(p, allow_pickle=False) as z:
+            return z['generated_token_ids'].tolist()
+
+    def pulse_stage(self, live, results):
+        """Requests that ran out of thinking budget without closing: a short push along the stop direction (prefix = what they
+        thought so far), then an unsteered continuation from the first </think>. Returns {id(req): (text, extra)}."""
+        todo = []
+        for (s, r), item in zip(live, results):
+            if 'think' not in r or item['response']['choices'][0].get('finish_reason') != 'length':
+                continue
+            ids = [t for t in self.ids_of(item) if t not in (IM_END, EOT)]
+            if END_THINK in ids:
+                continue
+            todo.append(((s, r), item, ids))
+        if not todo:
+            return {}
+        out = {}
+        for b in range(0, len(todo), self.max_batch):
+            part = todo[b:b + self.max_batch]
+            reqs = [dict(model=self.model_id, messages=r['messages'], max_tokens=self.a.pulse_tokens, seed=(r.get('seed') or 0) + 1, stream=False,
+                         metadata={'job_id': 'pulse-' + uuid.uuid4().hex[:10]}, think={'effort': r['think']['effort'], 'prefix_token_ids': ids}, steering=self.pulse,
+                         **{k: r[k] for k in ('temperature', 'top_k', 'top_p') if k in r}) for (s, r), item, ids in part]
+            t0 = time.time(); raw2 = http(self.a.engine + '/v1/batch/completions', {'batch_id': 'ffp-' + uuid.uuid4().hex[:12], 'requests': reqs}, timeout=self.a.timeout)
+            cont = []
+            for ((s, r), item, ids), item2 in zip(part, raw2['results']):
+                pids = self.ids_of(item2); keep = []
+                for x in pids:
+                    if x == END_THINK:
+                        keep.append(x); break
+                    if x >= 248000:
+                        break
+                    keep.append(x)
+                if END_THINK not in keep:
+                    keep.append(END_THINK)   # the pulse did not close by itself: close it (the forced-cap fallback)
+                cont.append(((s, r), ids + keep))
+                for key in ('activation_artifact', 'provenance_artifact'):
+                    pth = (item2['response'].get(key) or {}).get('path')
+                    if pth and self.a.artifact_root and pth.startswith(self.a.artifact_root):
+                        try: os.remove(pth)
+                        except OSError: pass
+            reqs3 = [dict(model=self.model_id, messages=r['messages'], max_tokens=self.a.answer_tokens, seed=(r.get('seed') or 0) + 2, stream=False,
+                          metadata={'job_id': 'answer-' + uuid.uuid4().hex[:10]}, think={'effort': r['think']['effort'], 'prefix_token_ids': prefix},
+                          **{k: r[k] for k in ('temperature', 'top_k', 'top_p') if k in r}) for (s, r), prefix in cont]
+            raw3 = http(self.a.engine + '/v1/batch/completions', {'batch_id': 'ffa-' + uuid.uuid4().hex[:12], 'requests': reqs3}, timeout=self.a.timeout)
+            secs = time.time() - t0
+            for ((s, r), prefix), item3 in zip(cont, raw3['results']):
+                aids = [t for t in self.ids_of(item3) if t not in (IM_END, EOT)]
+                think_ids = prefix[:prefix.index(END_THINK)]
+                reasoning = self.tok.decode(think_ids, skip_special_tokens=True) if self.tok else ''
+                answer = item3['response']['choices'][0]['message'].get('content') or ''
+                text = reasoning + '</think>' + answer
+                out[id(r)] = (text, {'finish': item3['response']['choices'][0].get('finish_reason'),
+                                     'usage': {'pulsed': True, 'pulse_at': len(think_ids), 'completion_tokens': len(prefix) + len(aids), 'reasoning_tokens': len(think_ids), 'answer_tokens': len(aids), 'pulse_seconds': round(secs, 1)}})
+                for key in ('activation_artifact', 'provenance_artifact'):
+                    pth = (item3['response'].get(key) or {}).get('path')
+                    if pth and self.a.artifact_root and pth.startswith(self.a.artifact_root):
+                        try: os.remove(pth)
+                        except OSError: pass
+        return out
 
     def run(self, part):
         reqs = []
@@ -132,8 +231,13 @@ class Shim:
         results = raw.get('results') or []
         if len(results) != len(live):
             raise RuntimeError(f'batch coverage differs: {len(results)} results for {len(live)} requests')
+        pulsed = {}
+        if self.pulse:
+            pulsed = self.pulse_stage(live, results)
         for (s, r), item in zip(live, results):
             resp = item['response']; choice = resp['choices'][0]; text = choice['message'].get('content') or ''
+            if id(r) in pulsed:
+                text, extra = pulsed[id(r)]; choice = dict(choice, finish_reason=extra['finish']); resp = dict(resp, usage={**(resp.get('usage') or {}), **extra['usage']})
             if '</think>' in text:
                 reasoning, answer = text.split('</think>', 1); reasoning = reasoning.strip(); answer = answer.lstrip('\n')
             elif 'think' in r:
@@ -159,7 +263,8 @@ class Shim:
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--engine', required=True); ap.add_argument('--port', type=int, required=True); ap.add_argument('--host', default='127.0.0.1')
     ap.add_argument('--effort', default='xhigh', choices=EFFORTS); ap.add_argument('--gather', type=float, default=1.0); ap.add_argument('--timeout', type=int, default=7200)
-    ap.add_argument('--log', default=''); ap.add_argument('--tokenizer', default='', help='tokenizer dir for exact prompt counts (the model checkpoint)'); ap.add_argument('--keep-artifacts', action='store_true'); ap.add_argument('--artifact-root', default='', help='delete the engine artifacts under this directory after each reply (empty: keep them)')
+    ap.add_argument('--log', default=''); ap.add_argument('--tokenizer', default='', help='tokenizer dir for exact prompt counts (the model checkpoint)'); ap.add_argument('--program', default='', help='json: steering program (+ split/window_start) attached to every thinking request');
+    ap.add_argument('--pulse-at', type=int, default=0, help='thinking allowance in tokens; a reply still thinking at this point gets the stop pulse, then an unsteered answer'); ap.add_argument('--pulse-kind', default='d', choices=('d', 'astra')); ap.add_argument('--direction', default='', help='think-direction .npz (layers, d, n_w)'); ap.add_argument('--astra', default='', help="Astra-Stop u.npy"); ap.add_argument('--pulse-alpha', type=float, default=4.0); ap.add_argument('--pulse-tokens', type=int, default=3); ap.add_argument('--answer-tokens', type=int, default=1500); ap.add_argument('--keep-artifacts', action='store_true'); ap.add_argument('--artifact-root', default='', help='delete the engine artifacts under this directory after each reply (empty: keep them)')
     a = ap.parse_args()
     shim = Shim(a)
     threading.Thread(target=shim.loop, daemon=True).start()

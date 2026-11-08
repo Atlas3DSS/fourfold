@@ -1,0 +1,29 @@
+# fourfold small array for the stop-signal trigger test (fabe-integration, 2026-11-08): 4x4 torus = one array of 16
+# agents, sum task with actions and the coordinate prime, thinking xhigh, served by the thinking-server shim on 9416/9417.
+
+agent = "llm"
+ticks = 20
+rows = 4
+cols = 4
+# world_seed = 1234    # unset: random, recorded in the run's meta record
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+prime = "you might not be alone."   # owner, 2026-11-07: prime them with "i might not be alone"
+
+[llm]
+base_url = ["http://127.0.0.1:9416/v1"]   # the thinking-server shim (never 9400-9406)
+model = "qwen38-27b"            # flare --served-model-name
+api_key_env = "FLARE_API_KEY"   # servers run without auth; unset is fine
+temperature = ""                # package defaults (qwen3.8 thinking preset: t=1, top_p=0.95, top_k=20)
+max_tokens = 7000              # the shim trims this to the page pool share
+max_tokens_param = "max_tokens"
+timeout = 3600                  # includes waiting for a slot: 4+ waves of about 5 min each
+retries = 2
+max_concurrency = 1000          # the router below decides; agents beyond the slots wait their turn
+endpoint_concurrency = 2        # 16K page pool per card: two in flight get ~8K each (prompt + reply)        # the sm_70 package's prepared capacity per server
+routing = "least_loaded"        # each call to the live server with the fewest in flight; a dead one is skipped
+
+[llm.extra_body]
+reasoning_effort = "xhigh"      # owner 2026-11-08; the template allows xhigh, medium, low (not high)

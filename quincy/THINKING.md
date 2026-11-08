@@ -107,6 +107,59 @@ slots (prompt plus reply), so four concurrent replies get about 4,000 tokens eac
 8K a slot at four in flight); the card has 8 GB free at 128 pages. The shim counts prompt tokens with the model's own
 tokenizer and trims each request's limit to its share, so the sim never gets a refusal, only a shorter reply.
 
+## The stop signal, and triggering it (owner: "there's a stop signal, replay what we have until you can reliably trigger it")
+
+**Where the stop is written.** Replaying the medium traces teacher-forced, one prefix at a time, and reading every layer's
+residual at that position: at the token that emits `</think>` the logit-lens logit for `</think>` at the last layer is
+14 to 17, against 0 to 6 everywhere else in the trace; the write builds from layer 56 upward (layer 60 reaches 8 to 11).
+At that same position the mid-layer think direction (the one neuropedia's edit used, layers 32 to 48) flips from about
+-3 to +0.8 in the edit's own units. The gap is about 4 units; the edit added 0.1, which is why it did nothing.
+
+**Astra-Stop.** [jarrodwatts/Qwen3.8-27B-Astra-Stop](https://huggingface.co/jarrodwatts/Qwen3.8-27B-Astra-Stop) doubles the
+last layer's write along the model's own `</think>` direction (a rank-one edit of layer 63's down projection, no training;
+its direction has cosine 0.99 with the `</think>` output row and 0.05 with the mid-layer think direction). Baked into our
+NVFP4 checkpoint column by column (97.5% of the wanted change landed, cosine 0.96) and served, it does not fix xhigh on our
+prompts either: five of six replies still ran to the limit inside the think block, one closed at 2,300 reasoning tokens.
+At medium it behaves like the unedited model. Its direction is useful as a trigger, below.
+
+**A constant push is the wrong tool.** Pushing the think direction at 2 to 4 units for the whole reply closes the thinking
+on the first token and then wrecks the output (stray tags, garbage tokens), because the stop state is a one-position flip,
+not an offset to hold.
+
+**A pulse is the right tool.** Take a run-on trace to token N, push along a stop direction for a few generated tokens only,
+then continue with nothing. Three teacher-forced requests do this on neuropedia's thinking server (its own per-step gating
+hook is not present on this engine build). Six run-on traces (two prompts, three seeds), pulse of four tokens at N=1,024:
+
+| pulse | closed during the pulse | wrote a reply with all four port tags | task sums wrong | tokens from close to end of reply |
+|---|---|---|---|---|
+| think direction, 4 units (unedited model) | 6 of 6 | 6 of 6 | 0 of 15 | 270 to 1,080 |
+| think direction, 4 units (Astra-edited model) | 6 of 6 | 5 of 6 | 0 of 7 | 320 to 900, one degenerate |
+| Astra direction, 60 (unedited) | 4 of 6 | 4 of 6 | 0 | 270 to 650 |
+| Astra direction, 60 (Astra-edited) | 6 of 6 | 5 of 6 | 0 of 8 | 320 to 750 |
+| Astra direction, 30 | 0 of 6 | | | |
+| Astra direction, 60 at N=3,000 | 3 of 6 (unedited), 4 of 6 (edited) | all that closed | 0 of 16 | 350 to 790 |
+
+The think direction at 4 units is the reliable trigger: it closes on the next token or two every time, and the model then
+writes its ordinary reply. As a shim option (`--pulse-at N`): the reply is generated up to N tokens; a reply still thinking
+at N gets a three-token pulse and then an unsteered answer of up to 1,500 tokens. On the two agent prompts at xhigh with
+N=2,048: 2,392 to 2,907 tokens per reply, 133 to 171 seconds for a pair, all four replies answered, three of four with all
+four port values valid, 11 of 12 sums right (against 21,576 to 22,084 tokens and 400 to 700 seconds uncapped).
+
+**On Flare, the production engine.** The same three steps through Flare's own endpoints (chat request capped at the
+allowance; raw continuation of prompt + reasoning with the steering program, phase decode, three tokens; raw unsteered
+continuation from `</think>`), on the signed steering package: two prompts, three seeds, allowance 2,048 tokens:
+
+| | closed during the pulse | all four port tags | all four values valid | task sums wrong | seconds per reply (three in flight) |
+|---|---|---|---|---|---|
+| Flare, think direction 4 units, pulse at 2,048 | 6 of 6 | 6 of 6 | 4 of 6 | 0 of 10 | 73 to 106 |
+
+Against 400 to 700 seconds and 21 to 25 thousand tokens uncapped. The sim needs no change: a small shim in front of the
+Flare server does the three steps and returns an ordinary chat reply with the reasoning in `reasoning_content`.
+
+**Small array.** Three 4x4 runs (16 agents, one array, sum task, coordinate prime, 20 ticks, same world seed) are running:
+xhigh with the trigger at 2,048 tokens on neuropedia's engine, the same on Flare, and medium. Their per-tick time, answer
+rate and sums go here when they end.
+
 ## Parked
 
 A server-side thinking budget for our Flare fork (cap the reasoning at N tokens, then force the think block closed
