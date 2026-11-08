@@ -16,6 +16,17 @@ replay of every run that you can bend from a flat grid into a torus. It refreshe
 
 ## The story so far
 
+> **New (8 November, evening): the model's own stop signal can be fired on demand.** With thinking at `xhigh`, a
+> Qwen3.8-27B agent reasons for twenty thousand tokens and often never answers. We replayed its traces and found the
+> moment it decides to stop: a flip of one direction in the middle layers and a write at the last layers that emits
+> `</think>`. A three-token push along that direction, applied once at a chosen point, makes the model close its
+> thinking on the next token and then write its ordinary reply: 12 of 12 run-on traces on one engine, 6 of 6 on the
+> production Flare server, task sums right, 73 to 106 seconds a reply instead of 400 to 700. Neither the weight edits
+> made for this (ccthink, Astra-Stop) nor a constant push do it; the pulse does. Small-array runs with the trigger are
+> in progress. Details in [section 8](#8-why-thinking-at-xhigh-runs-away-and-what-does-and-does-not-fix-it) and
+> [`quincy/THINKING.md`](quincy/THINKING.md).
+
+
 1. **Left alone, the weak model concludes it is alone.** With erz0r's prompt unchanged, all 28 agents in a 4×7
    grid answered "how many processes are there?" with **1**, after 100 ticks. Sol's nine agents were talking
    by tick 6.
@@ -331,8 +342,31 @@ What we learned:
 - **Format slips are not a thinking problem.** About one reply in three at every effort writes a 36-character hex value
   or uses a `<say>` action where a `<q>` tag was expected. That rate did not move with effort or with the edit.
 
-So the xhigh runs are off. Thinking runs go at medium (or low) on the same servers, with a thinking cap as the hard
-bound on tick time if one is wanted.
+**The stop signal, found and triggered (later the same day).** The owner's read was that a stop signal exists and that
+the edit had simply not reached it. Replaying the traces that did close, one prefix at a time, found it: at the token
+that emits `</think>` the last layer's logit for that token jumps from a background of 0-6 to 14-17, the write builds
+from layer 56 upward, and the mid-layer think direction (layers 32 to 48, the one the ccthink edit used) flips from about
+-3 to +0.8 in the edit's own units. The edit added 0.1 of that. [Astra-Stop](https://huggingface.co/jarrodwatts/Qwen3.8-27B-Astra-Stop),
+a rank-one edit that doubles the last layer's write along the `</think>` direction, is the same signal at layer 63; baked
+into our checkpoint it still left five of six xhigh replies running on.
+
+What works is a pulse: let the model think to a chosen point, push the think direction at 4 units for three generated
+tokens, then nothing. The model emits `</think>` on the next token or two and writes its ordinary reply.
+
+| pulse along the think direction, 4 units | closed during the pulse | then a proper fourfold reply | task sums wrong | seconds a reply |
+|---|---|---|---|---|
+| neuropedia's thinking engine, at token 1,024 of six run-on traces | 12 of 12 | 11 of 12 | 0 of 15 | |
+| Flare steering server (production), at 2,048 tokens, two agent prompts, three seeds | 6 of 6 | 6 of 6 | 0 of 10 | 73 to 106 |
+
+A constant push along the same direction closes the thinking on the first token and then wrecks the output; the stop
+state is a one-position flip, not an offset to hold. The sim does not change: a small shim in front of the Flare server
+does the three steps (chat request capped at the allowance, a steered three-token continuation, an unsteered continuation
+from `</think>`) and returns an ordinary reply with the reasoning kept. Three 4×4 runs on one world seed are measuring
+it against medium (per-tick time, answers, sums, format slips); their table goes in [`quincy/THINKING.md`](quincy/THINKING.md)
+and here when they end. First ticks: 400 seconds a tick on Flare with every agent pulsed and answering, against 475 to
+1,070 for medium; the pulsed replies write a too-long hex port value in about half of all replies, which is also the unedited model's
+rate at every effort on the same prompts (closing at a sentence boundary or pulsing at 3,000 tokens did not change it), so
+that is the task's hex format, not the stop.
 
 ### The same pictures as the original, at our scale
 
@@ -388,8 +422,9 @@ log and port value; `eval-t*.json` holds the final answers and scores.
   one tick, see section 8). The prompt's opening line for these runs is *"this eval is for multi agentic long running
   coordination."*, in place of *"you are being evaluated."* That line tells agents they are many, so their "are you
   alone" answers can't be compared with the earlier runs.
-- **Thinking runs at medium**, not xhigh, after section 8: same prompts, same answer rate, correct sums, at a twenty-fifth
-  of the tokens. A thinking cap (close the think block at N tokens, then answer) is ready if tick time needs a hard bound.
+- **Thinking runs with the stop trigger** (section 8): xhigh thinking to a chosen allowance, then the pulse, then the
+  answer; the small-array comparison against medium decides the allowance and whether a sentence-boundary close fixes the
+  hex-length slips. Medium remains the fallback.
 - **Finish and score the Qwen network task**, stopped at tick 69, so the two models can be compared on the final
   question too.
 - **Score the tori at tick 100** (paused at ticks 41 and 30 while the network task has the cards) and draw their

@@ -2,6 +2,12 @@
 
 fabe-integration, 2026-11-08. Status: measured; recommendation below.
 
+> **Headline.** The model has a stop signal and it can be fired on demand. A three-token push along the mid-layer think
+> direction (4 units, layers 32 to 48), applied once at a chosen point in a run-on, makes Qwen3.8-27B emit `</think>` on
+> the next token and then write its ordinary reply: 12 of 12 run-on traces on neuropedia's engine, 6 of 6 on the
+> production Flare server, task sums right, 73 to 106 seconds a reply at xhigh instead of 400 to 700. The weight edits
+> (ccthink, Astra-Stop) and constant pushes do not do this. See "The stop signal, and triggering it" below.
+
 ## The problem
 
 With thinking on at effort `xhigh`, a fourfold agent's reply to a small tick prompt runs away. On the production
@@ -155,6 +161,14 @@ continuation from `</think>`), on the signed steering package: two prompts, thre
 
 Against 400 to 700 seconds and 21 to 25 thousand tokens uncapped. The sim needs no change: a small shim in front of the
 Flare server does the three steps and returns an ordinary chat reply with the reasoning in `reasoning_content`.
+
+**Format slips are not the trigger's doing.** The one visible cost in the array runs is port values of the wrong length
+(ASCII packed into hex overshooting the 16 bytes). Two variants were measured on Flare against the plain pulse at 2,048
+(two prompts, three seeds each): finishing the current sentence before pulsing, and pulsing at 3,000 tokens. All three
+closed 6 of 6 and answered 6 of 6 with every task sum right (27 of 27); replies with all four values valid: 4, 3 and 3 of 6.
+The unedited model without any trigger had 3 of 6 at xhigh, 2 of 6 at medium and 3 of 6 at low on the same prompts, so
+about half of all replies carry a bad value whatever the effort or the trigger; it is the task's hex format, not the
+stop. Neither variant is needed; the plain pulse stays.
 
 **Small array.** Three 4x4 runs (16 agents, one array, sum task, coordinate prime, 20 ticks, same world seed) are running:
 xhigh with the trigger at 2,048 tokens on neuropedia's engine, the same on Flare, and medium. Their per-tick time, answer
