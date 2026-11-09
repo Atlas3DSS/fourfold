@@ -475,6 +475,52 @@ Column definitions (from `analyze.py`):
 Raw data is in [`experiments/quincy/runs/`](experiments/quincy/runs). `ticks.jsonl.gz` holds every prompt, reply,
 log and port value; `eval-t*.json` holds the final answers and scores.
 
+### 10. The bridge: no hand-written hex, and the one sentence that moved the count (2026-11-08/09)
+
+Findings first. Thirteen 4x4 arms of the sum task (16 agents, one private number each, the task is the exact total) ran
+overnight on Qwen3.8-27B. Twelve ended with no agent at the exact total. The thirteenth, the last of the night, ended with all
+16 agents reporting the exact total 6637 and the exact count 16, zero malformed values, 182 seconds a tick: the bridge (host-packed
+typed writes only), medium thinking without the stop pulse, one sentence about the size of the network, and a typed id:number
+pair write. The first agent had the total at tick 7, half of them at tick 13, all of them at tick 18. The steps that got there:
+
+- **Hand-written hex was the format problem, and it is gone.** Every arm where agents wrote port values by hand had 40 to 588
+  malformed values; every arm where the host packed the values (say-only, then the bridge) had none. Same model, same pulse.
+- **Under the stop pulse, agents were not passive, they were hand-writing hex instead of acting.** Actions per reply: 0.54
+  with hand-written ports, 4.7 with say-only, 6.9 with the bridge, all under the same pulse. The "passivity" we measured
+  earlier was mostly agents choosing the hex chore over the actions.
+- **The residual delta did not help.** The medium-minus-pulsed delta added back during the answer (alpha 0.5) tripled the
+  sums written but quadrupled the wrong ones and doubled malformed values; at alpha 1 it turned answers into thinking text;
+  on persona chat it made the lace loop. Dropped.
+- **What stopped them was a belief, not the wire.** With a clean channel and host-kept notes, agents collected all four
+  neighbours' numbers and declared "5 processes total". One sentence in the prompt, "the network is larger than your
+  neighbours: most processes are out of your direct reach, and a value travels only one hop unless someone passes it on",
+  took the count score from 0.47 to 0.79 (medium) and from 0.48 to 0.69 (pulsed). Agents then relayed whole number lists and
+  argued 17 against 18 against 19; the closest total was 6697 against 6637.
+- **Then the port width was the limit, and typed pairs removed it.** An id and a number do not fit a 16-character text
+  port, so agents sent bare numbers and double-counted or invented some. With a typed pair write (the host packs id:number
+  pairs, two per port, the reader sees the same pairs) the agents flooded pairs for the first six ticks (33 to 54 pair writes
+  a tick across the array), then settled: every agent held 16 distinct ids and the true total by tick 18, and pair traffic
+  fell to about 7 writes a tick for the rest of the run.
+
+| arm (all seed 20261108 unless noted) | ticks | malformed | actions / reply | s / tick | count score | closest or exact |
+|---|---|---|---|---|---|---|
+| medium, hand-written hex | 20 | 240 | 2.5 | 1,456 | 0.38 | 0/16 |
+| xhigh + stop pulse, hand-written hex | 20 | 315 | 0.54 | 467 | 0.21 | 0/16 |
+| pulse + answer delta 0.5 | 20 | 588 | 0.95 | 466 | 0.31 | 0/16 |
+| pulse, say-only (host-packed) | 20 | 0 | 4.7 | 450 | 0.29 | 0/16 |
+| pulse, bridge | 20 | 0 | 7.0 | 494 | 0.48 | 0/16 |
+| pulse, bridge, seed 20261109 | 20 | 0 | 6.9 | 583 | 0.50 | 0/16 |
+| medium, bridge | 15 | 0 | 6.2 | 519 | 0.47 | 0/16 |
+| pulse, bridge, structure sentence | 20 | 0 | 6.9 | 481 | 0.69 | 0/16 |
+| medium, bridge, structure sentence | 20 | 0 | 7.1 | 327 | 0.79 | 0/16, closest 6697 |
+| **medium, bridge, structure, pairs, 30 ticks** | 30 | 0 | 4.4 | 182 | **1.00** | **16/16 exact (6637), all by tick 18** |
+
+The bridge (sim flag `say_only`, prompt `prompts/system-bridge.txt`): the only way a port is written is a typed action the host
+packs (text, int, hex, pairs); intake shows each input decoded from the sender's declared type with a changed/same/busy flag; the
+host keeps a ledger of what arrived on each port and a notes table the agent sets, both shown every tick. Every write is a typed
+event in the tick record, so the trail is deterministic and auditable. The persona-chat trial of the pulse and lace recipes is in
+`experiments/quincy/think/persona-recipes/REPORT.md`; the arm evals are under `experiments/quincy/think/bridge-1109/`.
+
 ## What's next
 
 - **Registers and gluons** (section 9): rerun with the new instruction test, then remove our help one piece at a time, then

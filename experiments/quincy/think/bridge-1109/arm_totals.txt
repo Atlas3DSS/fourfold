@@ -1,0 +1,16 @@
+arm                                ticks  sums wrong  badport  acts/reply  wall/tick | eval: right/16 count wiring total
+bridge-medium-1108                    15   138     3        0       6.16       519 | 0/16 0.469 0.176 0.129
+bridge-medium-pairs-1109              12    17     0        0       6.18       208 | no eval yet
+bridge-medium-structure-1109          20    59    11        0       7.08       327 | 0/16 0.789 0.203 0.198
+flare-trigger-1108                    20    86     7      315       0.54       467 | 0/16 0.211 0.113 0.065
+flare-trigger-bridge-1108             20    26     0        0       7.04       494 | 0/16 0.48 0.164 0.129
+flare-trigger-bridge-s2-1109          20    23     6        0       6.94       583 | 0/16 0.504 0.058 0.113
+flare-trigger-bridge-structure-1109    20     6     0        0       6.94       481 | 0/16 0.691 0.047 0.148
+flare-trigger-delta-1108              20   244    31      588       0.95       466 | 0/16 0.312 0.07 0.076
+flare-trigger-delta-prime2-1108       20   248    25      515       0.73       479 | 0/16 0.254 0.082 0.073
+flare-trigger-p16-1108                15    45     0        1       0.68       426 | 0/16 0.191 0.0 0.038
+flare-trigger-p64-1108                20    51     6       40       0.99       428 | 0/16 0.215 0.09 0.067
+flare-trigger-prime2-1108             20    68     7      269       0.60       447 | 0/16 0.277 0.133 0.082
+flare-trigger-sayonly-1108            20    56     0        0       4.73       450 | 0/16 0.289 0.101 0.078
+medium-1108                           20   295    11      240       2.48      1456 | 0/16 0.379 0.039 0.09
+trigger-1108                           6     4     0       95       1.23      1203 | no eval yet

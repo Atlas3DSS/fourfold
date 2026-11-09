@@ -67,7 +67,9 @@ DEFAULTS = {
                                     # arrays are "seams"
     "seam_period": 1,               # a seam carries a new value only every n ticks (1 = like any other link)
     "actions": False,               # the five actions: say, ask, remember, recall, compute (see ACTIONS_TEXT)
-    "say_only": False,              # with actions: <say>/<ask> are the only way to write a port. <qN> leaves the reply format
+    "structure_hint": False,        # bridge: one sentence that the network is larger than your neighbours and values travel one hop
+    "say_only": False,              # the bridge: typed host-packed writes (say/ask/write) are the only way a port is written;
+                                    # intake is decoded from the sender's type, a silent sender shows busy, prompt system-bridge.txt
                                     # and is ignored if written, so a hand-packed value of the wrong length cannot exist
     "secret_range": [1, 999],       # task "sum": each agent's private number is drawn from this range
     "memory": "stateless",          # "stateless" (the original: each call sees only protocol + recent log) or
@@ -198,8 +200,41 @@ class AgentState:
     pool: str = ""                                   # mixed sizes: which model pool serves this agent
     fs: object = None                                # tools.AgentFS when actions are on
     action_results: list = field(default_factory=list)   # shown to the agent next tick
+    out_types: list = field(default_factory=lambda: ["empty"] * 4)   # bridge: what the host packed on each output: text, int, hex, empty
+    last_write_tick: int = 0                         # bridge: the last tick this agent wrote a port (0 = never)
+    ledger: list = field(default_factory=lambda: [[] for _ in range(4)])   # bridge: per input port, [(tick, decoded)] as values arrived
+    notes: dict = field(default_factory=dict)        # bridge: the agent's own key -> value table, shown every tick
     convo: list = field(default_factory=list)        # conversation memory: user/assistant messages this epoch
     convo_tokens: int = 0                            # tokens in the last request + reply of this epoch
+
+
+def bridge_intake(agent: dict, states: list[AgentState], t: int) -> list:
+    """per input port: (decoded value from the sender's declared type, sender busy = wrote nothing last tick).
+    also appends every new non-empty decoded value to the reader's ledger, with the tick it arrived."""
+    out, me = [], states[agent["id"]]
+    for i, l in enumerate(agent["links"]):
+        if not l:
+            out.append(("empty", False)); continue
+        src = states[l["agent"]]
+        decoded = port_decode(src.outputs[l["port"]], src.out_types[l["port"]])
+        out.append((decoded, t > 1 and src.last_write_tick < t - 1))
+        if decoded not in ("empty", "unknown") and (not me.ledger[i] or me.ledger[i][-1][1] != decoded):
+            me.ledger[i].append((t, decoded))
+    return out
+
+
+LEDGER_SHOWN = 8
+
+
+def bridge_state_block(st: AgentState) -> str:
+    """what the host remembers for the agent: the ledger of arrivals per port and its notes table."""
+    lines = ["\narrived on your input ports so far (tick: value, oldest first, last %d per port):" % LEDGER_SHOWN]
+    for i in range(4):
+        rows = st.ledger[i][-LEDGER_SHOWN:]
+        lines.append(f"p{i}: " + ("; ".join(f"t{tt}: {d}" for tt, d in rows) if rows else "nothing yet"))
+    lines.append("\nyour notes (key = value):")
+    lines.extend(f"{k} = {v}" for k, v in st.notes.items()) if st.notes else lines.append("(none; set one with <note key=\"k\">value</note>)")
+    return "\n".join(lines) + "\n"
 
 
 def read_inputs(world: list[dict], states: list[AgentState], t: int | None = None,
@@ -307,11 +342,8 @@ def rules_text(cfg: dict, agent: dict | None = None) -> str:
                 "processes, and scored on whether your answer is exactly right.")
     if registers.on(cfg):
         out += registers.rules_text(cfg)   # has its own action list: ports this narrow carry no sentences
-    elif cfg.get("actions"):
+    elif cfg.get("actions") and not cfg.get("say_only"):
         out += "\n\n" + ACTIONS_TEXT.replace("{nbytes}", str(HEXN // 2))
-        if cfg.get("say_only"):
-            out += ("\nyour output ports can only be written with say and ask. there is no other way to write to them, "
-                    "and a port keeps its value until you do.")
     if cfg.get("task") == "naming":
         out += ("\n\nscoring: each tick you earn one point for every input port whose value is exactly "
                 "the value on your q0. an all-zero value never earns points. your score is shown each tick.")
@@ -337,7 +369,13 @@ def system_prompt(meta: dict, seed: str) -> str:
     if (meta["config"].get("eval_line") or "").strip():
         template = template.replace("you are being evaluated.", meta["config"]["eval_line"].strip(), 1)
     if meta["config"].get("say_only"):
-        template = re.sub(r"<q[0-3]>\{fmt\}</q[0-3]>\n?", "", template)
+        template = meta["prompts"].get("system_bridge") or (ROOT / "prompts" / "system-bridge.txt").read_text(encoding="utf-8")
+        if (meta["config"].get("eval_line") or "").strip():
+            template = template.replace("you are being evaluated.", meta["config"]["eval_line"].strip(), 1)
+        template = template.replace("{nbytes}", str(HEXN // 2)).replace("{max_actions}", str(MAX_ACTIONS)).replace("{npairs}", str(HEXN // 16))
+        structure = (" the network is larger than your neighbours: most processes are out of your direct reach, and a value "
+                     "travels only one hop unless someone passes it on." if meta["config"].get("structure_hint") else "")
+        template = template.replace("{structure}", structure)
     if registers.on(meta["config"]):     # the format the prompt calls exact has to show the led line
         template = template.replace("in exactly this format:\n",
                                     "in exactly this format:\n" + registers.format_line(meta["config"]) + "\n", 1)
@@ -369,7 +407,8 @@ def port_pictures(inputs, outputs, scale: int) -> tuple[dict, list]:
 
 
 def tick_prompt(tpl: str, t: int, st: AgentState, inputs, changed, shown: int,
-                score: int | None = None) -> str:
+                score: int | None = None, intake: list | None = None) -> str:
+    """intake (the bridge): per input port (decoded text, sender busy) from the sender's declared type."""
     recent = st.log[-shown:] if shown > 0 else []
     vals = {
         "task_status": f"\nscore this tick: {score}" if score is not None else "",
@@ -382,6 +421,10 @@ def tick_prompt(tpl: str, t: int, st: AgentState, inputs, changed, shown: int,
     for i in range(4):
         vals[f"p{i}"] = inputs[i]
         vals[f"p{i}_status"] = "changed" if changed[i] else "unchanged"
+        if intake is not None:
+            decoded, busy = intake[i]
+            flag = "changed" if changed[i] else ("busy: the sender wrote nothing last tick" if busy else "same")
+            vals[f"p{i}_status"] = f"{flag}; {decoded}"
         vals[f"q{i}"] = st.outputs[i]
     if PIXEL:
         vals.update(port_pictures(inputs, st.outputs, 0)[0])
@@ -497,11 +540,13 @@ def parse_response(raw: str, prev_outputs, prev_protocol: str, word_limit: int,
 # ---------------------------------------------------------------- actions
 
 _ACT = re.compile(
-    r'<(?P<kind>say|ask)\s+port\s*=\s*["\']?(?P<port>q[0-3])["\']?\s*>(?P<text>.*?)</(?P=kind)>'
+    r'<(?P<kind>say|ask|write)\s+port\s*=\s*["\']?(?P<port>q[0-3])["\']?(?:\s+(?:as|type)\s*=\s*["\']?(?P<astype>text|int|hex|pairs)["\']?)?\s*>(?P<text>.*?)</(?P=kind)>'
     r'|<remember\s+name\s*=\s*["\'](?P<rname>[^"\']+)["\'](?:\s+mode\s*=\s*["\']?(?P<mode>append|write)["\']?)?\s*>'
     r'(?P<body>.*?)</remember>'
     r'|<recall(?:\s+(?P<rkey>name|search)\s*=\s*["\'](?P<rval>[^"\']*)["\'])?\s*/?>(?:\s*</recall>)?'
-    r'|<compute>(?P<expr>.*?)</compute>', re.S | re.I)
+    r'|<compute>(?P<expr>.*?)</compute>'
+    r'|<note\s+key\s*=\s*["\'](?P<nkey>[^"\']{1,24})["\']\s*>(?P<nval>.*?)</note>', re.S | re.I)
+MAX_NOTES = 32
 MAX_ACTIONS = 8
 
 
@@ -511,6 +556,58 @@ def text_to_port(text: str) -> tuple[str, str, bool]:
     cut = len(b) > HEXN // 2
     b = b[:HEXN // 2]
     return (b.hex() + ZERO)[:HEXN], b.decode("ascii"), cut
+
+
+def int_to_port(text: str) -> tuple[str | None, str]:
+    """a whole number -> a port value (big-endian, zero-padded). -> (hex or None, why)."""
+    t = text.strip().replace(",", "").replace("_", "")
+    if not re.fullmatch(r"\d+", t):
+        return None, f"{text.strip()[:32]!r} is not a whole number"
+    n = int(t)
+    if n >= 16 ** HEXN:
+        return None, f"{t[:32]} does not fit in {HEXN * 4} bits"
+    return f"{n:0{HEXN}x}", ""
+
+
+def pairs_to_port(text: str) -> tuple[str | None, str, list]:
+    """'id:num, id:num' -> a port value: per pair 4 bytes of id (8 hex) + 4 bytes of number, zero padded. -> (hex or None, why, pairs)."""
+    room = HEXN // 16
+    items = [x.strip() for x in re.split(r"[,;\s]+", text.strip()) if x.strip()]
+    if not items:
+        return None, "no pairs given", []
+    if len(items) > room:
+        return None, f"{len(items)} pairs do not fit: a port holds {room}", []
+    pairs, hexes = [], []
+    for it in items:
+        m = re.fullmatch(r"([0-9a-fA-F]{8})[:=]\s*(\d{1,10})", it)
+        if not m or int(m.group(2)) >= 2 ** 32:
+            return None, f"{it[:24]!r} is not id:number (8 hex digits, then a number below 4294967296)", []
+        pairs.append((m.group(1).lower(), int(m.group(2)))); hexes.append(m.group(1).lower() + f"{int(m.group(2)):08x}")
+    return ("".join(hexes) + ZERO)[:HEXN], "", pairs
+
+
+def port_pairs(v: str) -> list:
+    """the pairs packed in a port value (zero pairs skipped)."""
+    out = []
+    for j in range(0, HEXN - 15, 16):
+        chunk = v[j:j + 16]
+        if chunk.strip("0"):
+            out.append((chunk[:8], int(chunk[8:], 16)))
+    return out
+
+
+def port_decode(v: str, kind: str) -> str:
+    if kind == "pairs":
+        return "pairs " + ", ".join(f"{i}:{n}" for i, n in port_pairs(v)) if port_pairs(v) else "pairs (none)"
+    """how a reader sees a port, from the sender's declared type (the bridge): deterministic, no guessing."""
+    if kind == "int":
+        return f"int {int(v, 16)}"
+    if kind == "text":
+        t = port_as_text(v)
+        return f'text "{t}"' if t is not None else "text (empty)"
+    if kind == "hex":
+        return "hex"
+    return "empty" if not v.strip("0") else "unknown"
 
 
 def port_as_text(v: str) -> str | None:
@@ -531,19 +628,59 @@ def run_actions(raw: str, st: "AgentState", outs: list) -> tuple[list, list, lis
     for m in found[:MAX_ACTIONS]:
         if m.group("kind"):
             kind, port = m.group("kind").lower(), int(m.group("port")[1])
+            astype = (m.group("astype") or "text").lower() if kind == "write" else "text"
+            if astype == "int":
+                v, why = int_to_port(m.group("text"))
+                if v is None:
+                    results.append(f"write q{port} as int rejected: {why}. q{port} kept its value.")
+                    log.append({"kind": "write", "port": port, "type": "int", "rejected": why})
+                    continue
+                outs[port], st.out_types[port] = v, "int"; said.add(port)
+                results.append(f"write q{port}: int {int(v, 16)}")
+                log.append({"kind": "write", "port": port, "type": "int", "value": v, "decoded": str(int(v, 16))})
+                continue
+            if astype == "pairs":
+                v, why, pairs = pairs_to_port(m.group("text"))
+                if v is None:
+                    results.append(f"write q{port} as pairs rejected: {why}. q{port} kept its value.")
+                    log.append({"kind": "write", "port": port, "type": "pairs", "rejected": why})
+                    continue
+                outs[port], st.out_types[port] = v, "pairs"; said.add(port)
+                results.append(f"write q{port}: pairs " + ", ".join(f"{i}:{n}" for i, n in pairs))
+                log.append({"kind": "write", "port": port, "type": "pairs", "value": v, "decoded": ", ".join(f"{i}:{n}" for i, n in pairs)})
+                continue
+            if astype == "hex":
+                v = normalize_hex(m.group("text"))
+                if v is None:
+                    clean = re.sub(r"[\s_:]", "", m.group("text").strip())
+                    results.append(f"write q{port} as hex rejected: {clean[:40]!r} is not {HEXN} hex characters (got {len(clean)}). q{port} kept its value.")
+                    log.append({"kind": "write", "port": port, "type": "hex", "rejected": f"{len(clean)} characters"})
+                    continue
+                outs[port], st.out_types[port] = v, "hex"; said.add(port)
+                results.append(f"write q{port}: hex {v}")
+                log.append({"kind": "write", "port": port, "type": "hex", "value": v})
+                continue
             msg = " ".join(m.group("text").split())
             if kind == "ask" and not msg.endswith("?"):
                 msg += "?"
             outs[port], sent, cut = text_to_port(msg)
-            said.add(port)
+            st.out_types[port] = "text"; said.add(port)
             results.append(f'{kind} q{port}: sent "{sent}"' + (f" (cut to {HEXN // 2} characters)" if cut else ""))
-            log.append({"kind": kind, "port": port, "text": sent})
+            log.append({"kind": kind, "port": port, "type": "text", "text": sent, "value": outs[port]})
         elif m.group("rname") is not None:
             tool = "append_file" if (m.group("mode") or "").lower() == "append" else "write_file"
             name, body = m.group("rname").strip(), m.group("body").strip()
             r = st.fs.call(tool, name=name, text=body)
             results.append(f"remember {name}: {r}")
             log.append({"kind": "remember", "tool": tool, "name": name, "text": body})
+        elif m.group("nkey") is not None:
+            key, val = m.group("nkey").strip(), " ".join(m.group("nval").split())[:64]
+            if not val:
+                st.notes.pop(key, None); results.append(f"note {key}: forgotten"); log.append({"kind": "note", "key": key, "value": ""})
+            elif key in st.notes or len(st.notes) < MAX_NOTES:
+                st.notes[key] = val; results.append(f"note {key} = {val}"); log.append({"kind": "note", "key": key, "value": val})
+            else:
+                results.append(f"note {key} rejected: you already have {MAX_NOTES} notes; forget one first (an empty value)."); log.append({"kind": "note", "key": key, "rejected": "full"})
         elif m.group("expr") is not None:
             expr = " ".join(m.group("expr").split())
             r = tools.compute(expr)
@@ -564,10 +701,11 @@ def run_actions(raw: str, st: "AgentState", outs: list) -> tuple[list, list, lis
     return outs, results, log, said
 
 
-def action_blocks(st: "AgentState", inputs) -> str:
-    """the extra tick-prompt text when actions are on: inputs read as text, and last tick's results."""
+def action_blocks(st: "AgentState", inputs, bridge: bool = False) -> str:
+    """the extra tick-prompt text when actions are on: inputs read as text (not under the bridge, whose intake is typed),
+    and last tick's results."""
     out = ""
-    texts = [(i, port_as_text(v)) for i, v in enumerate(inputs)]
+    texts = [] if bridge else [(i, port_as_text(v)) for i, v in enumerate(inputs)]
     texts = [(i, t) for i, t in texts if t]
     if texts:
         out += "\ninputs read as text:\n" + "\n".join(f'p{i} "{t}"' for i, t in texts) + "\n"
@@ -1055,9 +1193,11 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             t=t, state=st, inputs=inp, changed=changed,
             system=system_prompt(meta, st.seed),
             history=list(st.convo) if convo else [],
-            prompt=tick_prompt(tpl, t, st, inp, changed, cfg["log_lines_shown"], score)
+            prompt=tick_prompt(tpl, t, st, inp, changed, cfg["log_lines_shown"], score,
+                               intake=bridge_intake(world[st.id], states, t) if cfg.get("say_only") else None)
                    + (registers.tick_block(meta, bank, st.id, t) if bank else "")
-                   + (action_blocks(st, inp) if cfg.get("actions") else ""),
+                   + (bridge_state_block(st) if cfg.get("say_only") else "")
+                   + (action_blocks(st, inp, bridge=bool(cfg.get("say_only"))) if cfg.get("actions") else ""),
             images=port_pictures(inp, st.outputs, int(cfg.get("pixel_scale", 16)))[1] if PIXEL else [],
         ))
 
@@ -1079,6 +1219,8 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             errors += perr
             if cfg.get("actions"):
                 outs, results, alog, said = run_actions(rep.raw, st, outs)
+                if said:
+                    st.last_write_tick = t
                 if said:   # a port written by say/ask needs no <qN> tag
                     errors = [e for e in errors if not any(e.startswith(f"q{i}:") for i in said)]
                     notices = [n for n in notices if not any(n.startswith(f"q{i}:") for i in said)]
@@ -1103,6 +1245,9 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         }
         if cfg.get("actions"):
             rec["actions"] = alog if not ((rep.error and not rep.raw) or refused) else []
+            if cfg.get("say_only"):
+                rec["out_types"] = list(st.out_types); rec["last_write_tick"] = st.last_write_tick
+                rec["ledger"] = [list(map(list, x)) for x in st.ledger]; rec["notes"] = dict(st.notes)
             rec["action_results"] = results if rec["actions"] else []
             st.action_results = rec["action_results"]
         if score is not None:
@@ -1148,6 +1293,8 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
 def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
     if cfg.get("say_only") and not cfg.get("actions"):
         sys.exit("config: say_only needs actions = true, or nothing can write a port")
+    if cfg.get("say_only") and registers.on(cfg):
+        sys.exit("config: say_only (the bridge) and registers together give the nodes a second channel; pick one")
     run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{random.randrange(16**4):04x}"
     world_seed = cfg["world_seed"]
     if world_seed is None:
@@ -1165,6 +1312,7 @@ def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
         "prompts": {
             "system": (ROOT / "prompts" / "system.txt").read_text(encoding="utf-8"),
             "tick": (ROOT / "prompts" / "tick.txt").read_text(encoding="utf-8"),
+            "system_bridge": (ROOT / "prompts" / "system-bridge.txt").read_text(encoding="utf-8"),
         },
         "agents": build_world(cfg["rows"], cfg["cols"], rng, torus=cfg.get("topology") == "torus"),
     }
@@ -1253,6 +1401,8 @@ def restore_states(meta: dict, ticks: list[dict]) -> list[AgentState]:
             st.prev_inputs = list(a["inputs"])
             st.notices = list(a.get("notices", []))   # older runs have none
             st.action_results = list(a.get("action_results", []))
+            st.out_types = list(a.get("out_types", st.out_types)); st.last_write_tick = int(a.get("last_write_tick", 0))
+            st.ledger = [[tuple(x) for x in port] for port in a.get("ledger", st.ledger)]; st.notes = dict(a.get("notes", {}))
         for st, w, a in zip(states, meta["agents"], ticks[-1]["agents"]):
             for i, l in enumerate(w["links"]):
                 if l and l.get("seam"):

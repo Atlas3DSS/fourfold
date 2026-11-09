@@ -24,6 +24,7 @@ scoring (all by code, no llm judge):
 from __future__ import annotations
 
 import argparse
+import os
 import asyncio
 import json
 import re
@@ -245,6 +246,10 @@ async def ask_all(meta: dict, ticks: list[dict], eval_tpl: str) -> tuple[int, li
                               history=list(st.convo) if meta["config"].get("memory") == "conversation" else [],
                               system=sim.system_prompt(meta, st.seed),
                               prompt=sim.fill(eval_tpl, vals), images=images))
+    if os.environ.get("FOURFOLD_EVAL_BASE_URL"):      # fabe 2026-11-09: evaluate on another live server when the original is gone
+        meta["config"]["llm"]["base_url"] = [os.environ["FOURFOLD_EVAL_BASE_URL"]]
+        meta["config"]["llm"].pop("pools", None)
+        print("eval: base_url overridden ->", meta["config"]["llm"]["base_url"], file=sys.stderr)
     agent = sim.make_agent(meta["config"])
     try:
         replies = await asyncio.gather(*(sim.safe_act(agent, tn) for tn in turns))

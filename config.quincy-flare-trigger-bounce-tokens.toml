@@ -1,0 +1,29 @@
+# fourfold small array, stop trigger + the owner's bouncing answer dose over tokens (bounce:0.825:0.03, L36-56:4), prime "you aren't alone,
+# coordinate to solve the problem provided" (fabe-integration, 2026-11-08). flare_pulse_shim2.py on 9450. Compare with
+# q-4x4-torus-sum-flare-trigger-prime2-1108 (plain) and -delta-prime2-1108 (alpha 0.5 constant), same seed 20261108.
+
+agent = "llm"
+ticks = 20
+rows = 4
+cols = 4
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+prime = "you aren't alone, coordinate to solve the problem provided"      # owner 2026-11-08; also passed as --set prime
+
+[llm]
+base_url = ["http://127.0.0.1:9450/v1"]   # flare_pulse_shim2 --answer-schedule bounce:0.825:0.03 over answer tokens (never 9400-9406)
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "xhigh"

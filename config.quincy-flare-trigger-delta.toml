@@ -1,0 +1,29 @@
+# fourfold small array: the stop trigger plus the act-vs-passive delta added back during the answer (fabe-integration, 2026-11-08).
+# Same as config.quincy-flare-trigger.toml (4x4 torus, sum task, actions, xhigh with the pulse at 2,048 tokens), served by
+# flare_pulse_shim2.py on 9440 (Flare steering server on 9426) with --answer-direction delta_capture.py's medium-minus-flare delta.
+
+agent = "llm"
+ticks = 20
+rows = 4
+cols = 4
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+prime = "you might not be alone."
+
+[llm]
+base_url = ["http://127.0.0.1:9442/v1"]   # flare_pulse_shim2, alpha 0.5 L36-56:4, every answer token (never 9400-9406)
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "xhigh"

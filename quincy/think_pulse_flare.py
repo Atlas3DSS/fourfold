@@ -68,6 +68,13 @@ def one(a, pname, p, seed, prog):
     ch = r1['choices'][0]; msg = ch['message']; reasoning = msg.get('reasoning_content') or ''; content = msg.get('content') or ''
     row.update(stage1_finish=ch['finish_reason'], stage1_tokens=(r1.get('usage') or {}).get('completion_tokens'), secs1=round(s1, 1))
     if ch['finish_reason'] == 'length' and not content.strip():
+        if a.boundary:   # finish the sentence first: an unsteered continuation that stops at the next line break or sentence end
+            rb, sb = post(a.url + '/completions', dict(model='qwen38-27b', prompt=render(p['system'], p['user'], a.effort, '<think>\n' + reasoning), max_tokens=a.boundary, seed=seed + 3, stop=['\n', '. ']))
+            extra = rb['choices'][0].get('text') or ''
+            if '</think>' in extra:   # it closed by itself while finishing the sentence
+                reasoning += extra.split('</think>', 1)[0]; row.update(boundary_text=extra[:80], boundary_closed=True)
+            else:
+                reasoning += extra + ('.' if rb['choices'][0].get('finish_reason') == 'stop' and not extra.rstrip().endswith('.') else ''); row.update(boundary_text=extra[:80], boundary_closed=False)
         prefix = render(p['system'], p['user'], a.effort, '<think>\n' + reasoning)
         r2, s2 = post(a.url + '/completions', dict(model='qwen38-27b', prompt=prefix, max_tokens=a.pulse_tokens, seed=seed + 1, steering=prog))
         pulse = r2['choices'][0].get('text') or ''
@@ -86,7 +93,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--url', required=True); ap.add_argument('--prompts', required=True); ap.add_argument('--out', required=True)
     ap.add_argument('--pulse-at', type=int, default=2048); ap.add_argument('--pulse-kind', default='d'); ap.add_argument('--direction', required=True, help='think-direction .npz (layers, d, n_w)'); ap.add_argument('--astra', default='', help="Astra-Stop u.npy (for --pulse-kind astra)"); ap.add_argument('--pulse-alpha', type=float, default=4.0); ap.add_argument('--pulse-tokens', type=int, default=3)
     ap.add_argument('--answer-tokens', type=int, default=1500); ap.add_argument('--effort', default='xhigh'); ap.add_argument('--seeds', type=int, default=3); ap.add_argument('--seed-base', type=int, default=20261108)
-    ap.add_argument('--only', default=''); ap.add_argument('--concurrency', type=int, default=3)
+    ap.add_argument('--only', default=''); ap.add_argument('--concurrency', type=int, default=3); ap.add_argument('--boundary', type=int, default=0, help='before the pulse, let the thinking run to the next line break or sentence end, at most this many tokens')
     a = ap.parse_args(); prompts = json.load(open(a.prompts)); Path(a.out).mkdir(parents=True, exist_ok=True); prog = program(a.pulse_kind, a.pulse_alpha, a.direction, a.astra)
     import threading
     jobs = [(pn, p, a.seed_base + s) for pn, p in prompts.items() if not a.only or pn in a.only.split(',') for s in range(a.seeds)]

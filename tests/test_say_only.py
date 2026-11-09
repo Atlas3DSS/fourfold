@@ -48,7 +48,9 @@ class SayOnly(unittest.TestCase):
         self.assertNotIn("<q0>", text)
         self.assertNotIn("{fmt}", text)
         self.assertIn("<log>...</log>", text)
-        self.assertIn("only be written with say and ask", text)
+        self.assertIn("you never write hex by hand", text)
+        self.assertIn('<write port="q2" as="int">', text)
+        self.assertIn("at most 8 actions a tick", text)
 
     def test_hand_written_tags_write_nothing(self):
         meta, states = self.world()
@@ -86,6 +88,101 @@ class SayOnly(unittest.TestCase):
         self.assertEqual(a["outputs"], ["a" * 32, "b" * 32, "c" * 32, "d" * 32])
         self.assertEqual(a["errors"], [])
         self.assertIn("<q0>", sim.system_prompt(meta, meta["agents"][0]["seed"]))
+
+    def test_write_int_and_hex(self):
+        meta, states = self.world()
+        a = self.step(meta, states, '<log>x</log><write port="q1" as="int">1066</write><write port="q2" as="hex">' + "ab" * 16 + '</write>'
+                                    '<write port="q3" as="int">-5</write><write port="q0" as="hex">abc</write>')
+        self.assertEqual(int(a["outputs"][1], 16), 1066)
+        self.assertEqual(a["outputs"][2], "ab" * 16)
+        self.assertEqual(a["outputs"][3], "0" * 32)
+        self.assertEqual(a["outputs"][0], "0" * 32)
+        self.assertEqual(a["out_types"], ["empty", "int", "hex", "empty"])
+        results = " ".join(a["action_results"])
+        self.assertIn("int 1066", results)
+        self.assertIn("not a whole number", results)
+        self.assertIn("not 32 hex characters", results)
+        kinds = [(x["kind"], x.get("type"), x.get("decoded") or x.get("rejected")) for x in a["actions"]]
+        self.assertEqual(kinds[0], ("write", "int", "1066"))
+        self.assertEqual(a["last_write_tick"], 1)
+
+    def test_intake_is_typed_and_busy_shows(self):
+        meta, states = self.world()
+        world = meta["agents"]
+        # agent 0 reads p0 from some neighbour: make that neighbour write an int and text, another neighbour nothing
+        link0 = world[0]["links"][0]; src = states[link0["agent"]]
+        src.outputs[link0["port"]] = f"{1066:032x}"; src.out_types[link0["port"]] = "int"; src.last_write_tick = 1
+        link1 = world[0]["links"][1]; src1 = states[link1["agent"]]
+        src1.outputs[link1["port"]] = sim.text_to_port("N=40")[0]; src1.out_types[link1["port"]] = "text"; src1.last_write_tick = 0
+        states[0].prev_inputs = sim.read_inputs(world, states)[0]                 # so nothing is 'changed'
+        turns = []
+        class Spy(Scripted):
+            async def act(self, turn):
+                turns.append(turn); return sim.Reply(raw="<log>x</log>")
+        asyncio.run(sim.step(2, meta, states, Spy("")))
+        prompt = turns[0].prompt
+        self.assertIn("p0 " + f"{1066:032x}" + "  (same; int 1066)", prompt)
+        self.assertIn('(busy: the sender wrote nothing last tick; text "N=40")', prompt)
+        self.assertNotIn("inputs read as text", prompt)                             # the heuristic reading is off under the bridge
+
+    def test_resume_keeps_types_and_write_ticks(self):
+        meta, states = self.world()
+        tick = asyncio.run(sim.step(1, meta, states, Scripted('<log>x</log><write port="q1" as="int">7</write>')))
+        again = sim.restore_states(meta, [tick])
+        self.assertEqual(again[0].out_types[1], "int")
+        self.assertEqual(again[0].last_write_tick, 1)
+        self.assertEqual(again[0].outputs[1], f"{7:032x}")
+
+    def test_registers_and_bridge_together_are_refused(self):
+        with self.assertRaises(SystemExit):
+            self.world(registers={**sim.registers.DEFAULTS, "enabled": True})
+
+    def test_ledger_and_notes_are_kept_shown_and_restored(self):
+        meta, states = self.world()
+        world = meta["agents"]
+        link0 = world[0]["links"][0]; src = states[link0["agent"]]
+        turns = []
+        class Spy(Scripted):
+            async def act(self, turn):
+                turns.append(turn); return sim.Reply(raw=self.reply)
+        # tick 1: agent 0 sets two notes and forgets one; a neighbour writes nothing
+        t1 = asyncio.run(sim.step(1, meta, states, Spy('<log>x</log><note key="e52ba3af">416</note><note key="tmp">1</note><note key="tmp"></note>')))
+        self.assertEqual(t1["agents"][0]["notes"], {"e52ba3af": "416"})
+        # the neighbour's output changes between ticks: the ledger of agent 0 picks it up at tick 2
+        src.outputs[link0["port"]] = f"{1066:032x}"; src.out_types[link0["port"]] = "int"; src.last_write_tick = 1
+        t2 = asyncio.run(sim.step(2, meta, states, Spy("<log>y</log>")))
+        prompt = [t for t in turns if t.t == 2 and t.state.id == 0][0].prompt
+        self.assertIn("e52ba3af = 416", prompt)
+        self.assertIn("p0: t2: int 1066", prompt)
+        self.assertEqual(t2["agents"][0]["ledger"][0], [[2, "int 1066"]])
+        again = sim.restore_states(meta, [t1, t2])
+        self.assertEqual(again[0].notes, {"e52ba3af": "416"})
+        self.assertEqual(again[0].ledger[0], [(2, "int 1066")])
+        self.assertIn("ledger", sim.system_prompt(meta, meta["agents"][0]["seed"]))
+
+    def test_structure_hint_is_off_by_default_and_one_sentence_when_on(self):
+        meta, _ = self.world()
+        self.assertNotIn("larger than your neighbours", sim.system_prompt(meta, meta["agents"][0]["seed"]))
+        self.assertNotIn("{structure}", sim.system_prompt(meta, meta["agents"][0]["seed"]))
+        import shutil; shutil.rmtree(sim.RUNS / "run")
+        meta, _ = self.world(structure_hint=True)
+        text = sim.system_prompt(meta, meta["agents"][0]["seed"])
+        self.assertIn("until you replace it. the network is larger than your neighbours", text)
+
+    def test_pairs_write_packs_and_decodes(self):
+        meta, states = self.world()
+        a = self.step(meta, states, '<log>x</log><write port="q1" as="pairs">e52ba3af:416, 8c7a7c7d:469</write>'
+                                    '<write port="q2" as="pairs">a:1</write><write port="q3" as="pairs">11111111:1 22222222:2 33333333:3</write>')
+        self.assertEqual(a["outputs"][1], "e52ba3af" + f"{416:08x}" + "8c7a7c7d" + f"{469:08x}")
+        self.assertEqual(a["out_types"][1], "pairs")
+        self.assertEqual(sim.port_decode(a["outputs"][1], "pairs"), "pairs e52ba3af:416, 8c7a7c7d:469")
+        self.assertEqual(a["outputs"][2], "0" * 32)
+        self.assertEqual(a["outputs"][3], "0" * 32)
+        results = " ".join(a["action_results"])
+        self.assertIn("is not id:number", results)
+        self.assertIn("3 pairs do not fit", results)
+        self.assertIn("as=\"pairs\"", sim.system_prompt(meta, meta["agents"][0]["seed"]))
+        self.assertIn("up to 2 id:number pairs", sim.system_prompt(meta, meta["agents"][0]["seed"]))
 
 
 if __name__ == "__main__":

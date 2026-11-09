@@ -1,0 +1,32 @@
+# fourfold small array, the bridge format at medium, NO pulse, plus the structure sentence (owner 2026-11-09: "the network is
+# larger than your neighbours ... a value travels only one hop unless someone passes it on", flag structure_hint). Same seed and
+# server (Flare 9427) as q-4x4-torus-sum-bridge-medium-1108, so the sentence is the only change.
+
+agent = "llm"
+ticks = 20
+rows = 4
+cols = 4
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+say_only = true
+structure_hint = true
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+prime = "you aren't alone, coordinate to solve the problem provided"      # owner 2026-11-08; also passed as --set prime
+
+[llm]
+base_url = ["http://127.0.0.1:9434/v1"]   # Flare steering server 9434, no shim (never 9400-9406)
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "medium"
