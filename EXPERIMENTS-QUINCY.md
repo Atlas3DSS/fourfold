@@ -555,7 +555,9 @@ What we learned beyond "it works":
 - On the 27B, two trees did not save the tree: both slipped the same way. The method says to report up only once
   everything below has answered, but agents reported early and never revised. The two trees disagreed and 94 agents
   rightly gave no number. The fix in the older literature (Dijkstra and Scholten 1980; Chang 1982) is a once-only rule:
-  a node reports exactly once, after every child's report is final. The next run has the host enforce it.
+  a node reports exactly once, after every child's report is final. With the host enforcing it, the 27B rerun had no early
+  or changed reports (7 refused) and tree A came out exact, but tree B was 100 too high: one agent added three numbers in
+  its head instead of letting the host add them. 1/100 exact, 98 abstained. Next: the host checks the sub's value too.
 
 Help given beyond section 10's recipe: the method text, the typed write, the host doing the additions, a host-designated
 root, being told that p_i and q_i lead to the same neighbour (tree) or that q_d leads round a ring back to p_d (ring), and a

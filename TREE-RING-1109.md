@@ -186,3 +186,20 @@ before). Code: `tree_check_write` in `sim.py`; tests in `tests/test_tree_ring.py
 
 Qwen3.8-27B, medium thinking, the same recipe and prompt as `q-10x10-torus-sum-tree-verify-1110` apart from the sentence
 above; served on seven Flare servers instead of four, which changes speed but not the prompts.
+
+### Third-amendment results (2026-11-10, filled 19:40Z from `measure.py` and a trace of ticks.jsonl)
+
+| run | world | result | verdict |
+|---|---|---|---|
+| **q-4x4-torus-sum-tree-once-smoke-1110** | 4x4, two trees, once-only check | **16/16 exact, 0 wrong, 0 no number**; all held the total at tick 16; 3 writes refused (one by the new check: a sub on the wrong output); 29 s a tick on 7 servers | **pass** (gate opened) |
+| **q-10x10-torus-sum-tree-once-1110** | 10x10, two trees, once-only check | **1/100 exact, 1 wrong (49,789), 98 no number** at eval_t44 (the run stopped itself once all held both totals). Tree A **49,689 over 100, exact**; tree B 49,789 over 100, 100 too high. 92 agents held both totals and saw they disagree. Every count answer 100. 7 writes refused by the once-only check (4 subs before all three inputs answered, 2 subs on the wrong output, 1 second sub); none got through. 124 s a tick on 7 servers (226 on 4 before); median prompt 2,074 tokens at tick 1, 2,916 at tick 10, 3,854 at tick 30 | **fail** (needs 90 exact, 0 wrong) |
+
+**Trace of the 10x10 failure.** Every sub in both trees was checked against the agent's own number plus its children's
+final subs. 198 of 199 match. The one that does not: in tree B, agent 75 (0-based; 76 on the website), number 934, with
+children showing `B sub 12344 19` and `B sub 719 1`, wrote `B sub 14097 21` at tick 32. The right sum is 13,997. It had
+asked `<compute>934 + 12344 + 719</compute>` in the same reply but wrote its own figure before the result came back (results
+arrive the next tick), instead of writing the terms out with + for the host to add, as the method says. That one +100
+accounts for tree B's whole error. So the once-only rule removed the failure it was built for (no early or changed sub
+got through), and what remains is an addition slip the host does not check. The obvious next step, not yet run: the
+host also checks the sub's value (own number + every child's S), as the ring check does, or refuses a sub not written as a
+sum of those terms.
