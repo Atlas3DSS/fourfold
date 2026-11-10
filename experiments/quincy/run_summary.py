@@ -125,8 +125,12 @@ def told(cfg: dict) -> tuple[str, str]:
 def world(meta: dict) -> str:
     cfg = meta["config"]
     n = len(meta["agents"])
-    shape = "torus (edges wrap, nobody sits at an edge)" if meta.get("topology") == "torus" else "flat grid (edge ports are dead)"
-    s = f"{n} agents on a {meta['rows']}×{meta['cols']} {shape}"
+    if meta.get("topology") == "tesseract":
+        side = meta["config"].get("side") or round(n ** 0.25)
+        s = f"{n} agents on a tesseract: a {side}×{side}×{side}×{side} torus in four dimensions, edges wrap (drawn here as a {meta['rows']}×{meta['cols']} sheet)"
+    else:
+        shape = "torus (edges wrap, nobody sits at an edge)" if meta.get("topology") == "torus" else "flat grid (edge ports are dead)"
+        s = f"{n} agents on a {meta['rows']}×{meta['cols']} {shape}"
     if cfg.get("modules"):
         k = (meta["rows"] // cfg["modules"][0]) * (meta["cols"] // cfg["modules"][1])
         s += f", cut into {k} arrays of {cfg['modules'][0]}×{cfg['modules'][1]}"
@@ -375,6 +379,8 @@ def summarize_loaded(run: Path, meta: dict, ticks: list, ev, ratchet: list, note
                     f"{count('program_reverted') + count('program_failed_test')} undone or failed."]
         if notes.get("note"):
             findings.append(notes["note"])
+    if notes.get("verdict"):   # hand-written override, for runs judged by a pass bar rather than all-or-nothing
+        verdict = notes["verdict"]
     return {
         "run": run.name, "title": title, "world": world(meta), "told": told_s, "asked": asked_s,
         "status": st["line"], "state": st["state"], "ticks": st["ticks"], "scored_at": st["scored_at"],

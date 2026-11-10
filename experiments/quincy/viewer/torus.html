@@ -24,19 +24,23 @@ body { background: var(--ink); color: var(--paper); font-family: var(--mono); fo
 #stage canvas { display: block; }
 .hud { position: fixed; z-index: 2; pointer-events: none; }
 .hud > * { pointer-events: auto; }
+/* the header is a solid band across the top; the lattice is framed in the space left between it, the side panels
+   and the transport bar (frameLattice below), so nothing in the header ever sits on top of the lattice */
 header.hud {
-  top: env(safe-area-inset-top, 0px); left: 0; right: 0;
-  padding-block: 14px 0;
+  top: 0; left: 0; right: 0;
+  padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: 10px;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
-  display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline;
+  display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
+  background: var(--ink); border-bottom: 1px solid var(--line); pointer-events: auto;
 }
 h1 { font-family: var(--display); font-weight: 700; font-size: 24px; letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
-.facts { color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.facts { color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; flex: 1 1 320px; min-width: 0; }
 .facts b { color: var(--paper); font-weight: 500; }
-@media (min-width: 721px) { header.hud { max-width: calc(100vw - 270px); } }
+.pick { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; min-width: 0; }
+.pick select { flex: 0 1 720px; min-width: 0; text-overflow: ellipsis; }
 @media (min-width: 721px) and (max-width: 1100px) { body.about-open #legend { display: none; } }
 select, button, input[type=range] { font: inherit; color: var(--paper); }
-select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; max-width: 100%; }
+select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; max-width: 100%; min-width: 0; }
 #legend {
   right: max(16px, env(safe-area-inset-right, 0px)); top: var(--hud-top, calc(env(safe-area-inset-top, 0px) + 64px));
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
@@ -52,8 +56,8 @@ select { background: var(--panel); border: 1px solid var(--line); border-radius:
   left: 0; right: 0; bottom: 0;
   padding-block: 12px calc(14px + env(safe-area-inset-bottom, 0px));
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
-  background: linear-gradient(to top, #111626f2, #11162600);
-  display: grid; grid-template-columns: auto auto 1fr auto; gap: 12px 14px; align-items: center;
+  background: var(--ink); border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px 14px; align-items: center;
 }
 #transport .row2 { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; color: var(--muted); }
 button.play { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--hot); background: transparent; cursor: pointer; }
@@ -66,7 +70,7 @@ label.ctl input[type=range] { width: 150px; }
 .morph-ends { color: var(--muted); }
 #about {
   left: max(16px, env(safe-area-inset-left, 0px)); top: var(--hud-top, calc(env(safe-area-inset-top, 0px) + 64px));
-  width: 360px; max-height: calc(100vh - var(--hud-top, 64px) - 190px - env(safe-area-inset-bottom, 0px)); overflow-y: auto;
+  width: 360px; max-height: calc(100vh - var(--hud-top, 64px) - var(--hud-bottom, 110px) - 12px); overflow-y: auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 14px; line-height: 1.45;
 }
 #about h2 { font-family: var(--display); font-size: 16px; font-weight: 700; margin: 0 0 2px; text-wrap: balance; }
@@ -93,18 +97,28 @@ button.about[aria-expanded="true"] { border-color: var(--hot); color: var(--hot)
 #tip .log { color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
 .note { color: var(--muted); max-width: 60ch; }
 @media (max-width: 720px) {
-  #about { width: auto; right: max(16px, env(safe-area-inset-right, 0px)); max-height: calc(100vh - 300px - env(safe-area-inset-bottom, 0px)); }
-  #legend { top: auto; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); width: auto; left: max(16px, env(safe-area-inset-left, 0px)); grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
-  #legend h2, #legend .note { grid-column: 1 / -1; }
+  #about { width: auto; right: max(16px, env(safe-area-inset-right, 0px)); z-index: 3; }
+  #legend { top: auto; bottom: calc(var(--hud-bottom, 150px) + 8px); width: auto; left: max(16px, env(safe-area-inset-left, 0px)); grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); padding: 8px 12px; gap: 4px 10px; }
+  #legend h2 { grid-column: 1 / -1; }
+  #legend .note { display: none; }
+  #transport { grid-template-columns: auto auto 1fr; }
+  #transport #mode { grid-column: 1 / -1; }
+  .pick select { flex-basis: 100%; }
   h1 { font-size: 20px; }
   label.ctl input[type=range] { width: 110px; }
 }
 @media (prefers-reduced-motion: reduce) { button.play:hover { background: transparent; } }
 #logo { height: 28px; width: auto; align-self: center; }
 button.fresh { background: var(--hot); color: var(--ink); border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-weight: 500; }
-.banner { margin: 6px 0 10px; padding: 8px 12px; border-left: 3px solid var(--hot); background: color-mix(in srgb, var(--hot) 10%, transparent); font-size: 13px; line-height: 1.4; max-width: 72ch; }
+.banner { flex: 1 1 100%; margin: 0; padding: 6px 12px; border-left: 3px solid var(--hot); background: color-mix(in srgb, var(--hot) 10%, var(--ink)); font-size: 13px; line-height: 1.45; max-width: 110ch; box-sizing: border-box; }
 .banner b { color: var(--hot); }
 .banner a { color: inherit; }
+details.banner > summary { cursor: pointer; list-style: none; }
+details.banner > summary::-webkit-details-marker { display: none; }
+details.banner > summary::after { content: " more ▾"; color: var(--hot); white-space: nowrap; }
+details.banner[open] > summary::after { content: " less ▴"; }
+details.banner .banner-body { margin-top: 6px; max-height: 40vh; overflow-y: auto; }
+details.banner .banner-body p { margin: 0 0 6px; }
 </style>
 <style id="theme">/*THEME*/</style>
 
@@ -113,11 +127,13 @@ button.fresh { background: var(--hot); color: var(--ink); border: 0; border-radi
 <header class="hud">
   <img id="logo" alt="" hidden>
   <h1>Fourfold Torus</h1>
-  <!--BANNER-->
   <div class="facts" id="facts"></div>
-  <select id="dataset" aria-label="Run"></select>
-  <button id="about-btn" class="about" aria-expanded="true" aria-controls="about">about this run</button>
-  <button id="fresh" class="fresh" hidden>Newer ticks: load</button>
+  <!--BANNER-->
+  <div class="pick">
+    <select id="dataset" aria-label="Run"></select>
+    <button id="about-btn" class="about" aria-expanded="true" aria-controls="about">about this run</button>
+    <button id="fresh" class="fresh" hidden>Newer ticks: load</button>
+  </div>
 </header>
 
 <aside class="hud" id="about" aria-label="What this run is and how it ended"></aside>
@@ -349,7 +365,9 @@ function facts() {
         (D.actions ? `<span><b>5 actions</b>: say, ask, remember, recall, compute</span>` : "") +
         (D.modules ? `<span><b>${(D.rows / D.modules[0]) * (D.cols / D.modules[1])} arrays</b>${D.seam_period > 1 ? `, seams every ${D.seam_period} ticks` : ""}</span>` : "")
       : `<span>prime: <b>${D.prime ? "“" + D.prime + "”" : "none"}</b></span>`);
-  document.getElementById("wiring").textContent = wrap
+  document.getElementById("wiring").textContent = D.topology === "tesseract"
+    ? "Tesseract run: four dimensions, drawn flat as one sheet. The picture shows who is who, not the wiring."
+    : wrap
     ? "Edges really wrap: every agent has four neighbours."
     : "Flat-grid run: edge ports are dead. Bending it shows the shape only.";
   const sc = document.getElementById("scrub"); sc.max = D.frames.length - 1;
@@ -382,10 +400,26 @@ function setAbout(open) {
 }
 aboutBtn.onclick = () => setAbout(!aboutOpen);
 setAbout(aboutOpen);
-// the header wraps onto several lines on narrow windows: keep the side panels below it
-const hdr = document.querySelector("header.hud");
-const placePanels = () => document.documentElement.style.setProperty("--hud-top", (hdr.offsetTop + hdr.offsetHeight + 12) + "px");
-new ResizeObserver(placePanels).observe(hdr); placePanels();
+// The canvas fills the window, but the camera frames the lattice inside the free space between the header, the side
+// panels and the transport bar (a view offset), so the panels never cover it. Side panels sit below the header.
+const hdr = document.querySelector("header.hud"), transportEl = document.getElementById("transport"), legendEl = document.getElementById("legend");
+const shown = el => !el.hidden && getComputedStyle(el).display !== "none" && el.offsetWidth > 0;
+function frameLattice() {
+  const W = innerWidth, H = innerHeight, css = document.documentElement.style;
+  const top = hdr.offsetHeight, bottom = transportEl.offsetHeight;
+  css.setProperty("--hud-top", (top + 12) + "px"); css.setProperty("--hud-bottom", bottom + "px");
+  let x0 = 0, x1 = W, y0 = top, y1 = H - bottom;
+  if (W > 720) {
+    if (shown(aboutEl)) x0 = aboutEl.getBoundingClientRect().right + 8;
+    if (shown(legendEl)) x1 = legendEl.getBoundingClientRect().left - 8;
+  } else if (shown(legendEl)) y1 = Math.min(y1, legendEl.getBoundingClientRect().top - 8);
+  const fw = Math.max(80, x1 - x0), fh = Math.max(80, y1 - y0);
+  renderer.setSize(W, H);
+  camera.aspect = fw / fh;
+  camera.setViewOffset(fw, fh, -x0, -y0, W, H);   // updates the projection matrix
+}
+const ro = new ResizeObserver(() => frameLattice());
+[hdr, transportEl, aboutEl, legendEl].forEach(el => ro.observe(el));
 
 // ---------- interaction
 const sel = document.getElementById("dataset");
@@ -442,8 +476,7 @@ renderer.domElement.addEventListener("pointermove", e => {
 });
 renderer.domElement.addEventListener("pointerleave", () => tip.hidden = true);
 
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
-addEventListener("resize", resize); resize();
+addEventListener("resize", frameLattice); frameLattice();
 
 function loop(ts) {
   requestAnimationFrame(loop);

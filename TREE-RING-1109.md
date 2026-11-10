@@ -106,14 +106,28 @@ would have reported a wrong sum with full confidence.
 | q-4x4-torus-sum-tree-smoke-1110 | 4x4, one tree | 16/16 exact, 0 wrong; all held the total at tick 14, which is the perfect-agent floor; 23 s a tick; median prompt 1,884 tokens at tick 1, 2,537 at tick 10 | smoke |
 | **q-10x10-torus-sum-tree-told-1110** | 10x10, one tree | **100/100 exact, 0 wrong, 0 no number**; first exact total at tick 23, all held it at tick 33 (floor 32) and the run stopped itself; every count answer 100; 0 rejected writes, 0 missing replies in 3,300 turns; 202 s a tick; median prompt 1,885 tokens at tick 1, 2,500 at tick 10, 3,326 at tick 30 | **pass** |
 | q-tesseract2-sum-ring-smoke-1110 | 16-agent tesseract, ring, first rule | 0/16 exact, 13 wrong, 3 no number; the 256-agent run was skipped by the gate | **fail** (smoke) |
-| q-10x10-torus-sum-tree-verify-1110 | 10x10, two trees (amended text and host check) | paused at tick 9 to give the cards to the tesseract; resumes after it | pending |
+| **q-10x10-torus-sum-tree-verify-1110** | 10x10, two trees (amended text and host check) | **0/100 exact, 6 wrong, 94 no number** at eval_t41. Both trees came out wrong and disagreed: tree A 49,688 over 100 (true 49,689, one short), tree B 47,863 over 96. 94 agents saw the disagreement and gave no number; 6 answered tree A's 49,688. All 100 held both totals at tick 41 and the run stopped itself there, so the totals were final and running to tick 60 would not change them. Every count answer 100; 0 rejected writes, 0 missing replies; 226 s a tick; median prompt 2,028 tokens at tick 1, 2,843 at tick 10, 3,692 at tick 30. The run was paused at tick 9 for about 11 h and resumed from its saved state; whether that played a part is not traced | **fail** (needs 90 exact, 0 wrong) |
 | q-tesseract2-sum-ring-smoke-v2-1110 | 16-agent tesseract, ring, second attempt (host-checked) | 16/16 exact, 0 wrong, 0 no number; all held the total at tick 9 (the perfect-agent pace); 2 writes refused, both the wrong-base slip of the first attempt; every count answer 16 | smoke |
-| q-tesseract4-sum-ring-v2-1110 | tesseract side 4, ring, second attempt (host-checked) | started 04:00Z, moved ahead of the two-tree run | pending |
+| **q-tesseract4-sum-ring-v2-1110** | tesseract side 4, ring, second attempt (host-checked) | **253/256 exact, 1 wrong, 2 no number** at eval_t40. First exact total at tick 17 (the scripted-agent pace), 83 agents held it that tick, 230 at tick 33, 253 at tick 40; never all 256. No agent ever held a wrong total; the one wrong answer (126,660) came from an agent that did not hold the total. 254 of 256 count answers were 256. 36 writes refused by the host, 13 missing replies in 10,240 turns; 814 s a tick; median prompt 1,982 tokens at tick 1, 3,628 at tick 10, 4,191 at tick 30 | **pass** (230 exact, at most 5 wrong, by tick 40), with the extra host help described below |
 
 Baseline for the same model and recipe with flooding: 4x4 solved at tick 18 at 182 s a tick; 10x10 0/100 at tick 60 at
 375 s a tick with median prompts of 4,080 tokens at tick 10 and 5,600 at tick 60.
 
-Pending rows are filled from `.venv/bin/python experiments/tree_ring/measure.py runs/<run>` as the runs finish.
+Rows are filled from `.venv/bin/python experiments/tree_ring/measure.py runs/<run>`. The last two were filled 2026-11-10 15:40Z after the chain ended; Trace of the two-tree failure is below.
+
+**Trace of the 27B two-tree run (`q-10x10-torus-sum-tree-verify-1110`), from ticks.jsonl.** Every parent added correctly
+what was on its input at the time. The three losses are all a child changing its `sub` entry after its parent had already
+used it and passed its own sum up; the parent never revised.
+- Tree A, one short: agent 14 (number 121) read `sub 899 2` from its child at tick 12 and wrote `sub 1020 3`. The child's entry
+  then changed (1099 at tick 13, 900 in the end). 900 + 121 = 1021.
+- Tree B, 100 short: agent 69 (number 416) read `sub 1901 3` at tick 14 and wrote `sub 2317 4`; the child's entry was 2001
+  from tick 15.
+- Tree B, 1,726 and 4 agents short: agent 72 (number 631) read `sub 578 1` at tick 10 and wrote `sub 1209 2`; that child had
+  reported before its own children came in and ended at `sub 2304 5`.
+100 + 1,726 = 1,826 = 49,689 - 47,863, and 96 = 100 - 4, so these three account for both wrong totals. The host check added
+in the first amendment did not refuse any write (0 rejected). All three happened at ticks 10 to 14, just after the run
+resumed from its pause at tick 9; whether the resume caused the early or changed entries is not established. Not traced:
+why the children's first entries were early or wrong.
 
 ## Ring arm: first attempt failed on both models; second amendment (2026-11-10 03:50Z)
 

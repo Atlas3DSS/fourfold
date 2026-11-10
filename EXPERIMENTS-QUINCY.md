@@ -539,9 +539,9 @@ frozen before any model result was read; the full record, including two amendmen
 | arm | Qwen3.8-27B | Claude Haiku 5.5 |
 |---|---|---|
 | 10x10 torus, one tree | **100/100 exact, 0 wrong**, all at tick 33 (perfect agents: 32); 202 s a tick against 375 s flooding | **100/100 exact**, tick 34 |
-| 10x10 torus, two trees that must agree | paused at tick 9 behind the tesseract run | first attempt failed (one tree silently lost a branch of 11; the other tree exposed it); after a host check, **100/100**, tick 48 |
+| 10x10 torus, two trees that must agree | **failed**: 0/100 exact, 6 wrong, 94 gave no number. Both trees slipped (49,688 over 100 and 47,863 over 96; true 49,689); in each slip a parent passed its sum up before a child had finished and never redid it | first attempt failed (one tree silently lost a branch of 11; the other tree exposed it); after a host check, **100/100**, tick 48 |
 | 4x28 torus, 7 arrays, links that deliver every 2nd tick | not run | **112/112 exact**, tick 64 (perfect: 50), about half the tokens of flooding, which got 0/112 |
-| tesseract, 256 agents, one ring per port | 16-agent smoke test **failed** (0/16), so the 256 run was skipped. Second attempt with host-checked ring writes: smoke **16/16**; the 256-agent run is in progress | **failed**: 186/256 exact, 70 wrong (first attempt; no second attempt yet) |
+| tesseract, 256 agents, one ring per port | first attempt: 16-agent smoke test **failed** (0/16), so the 256 run was skipped. Second attempt with host-checked ring writes: smoke **16/16**, then **253/256 exact, 1 wrong, 2 no number** at tick 40, a **pass** (bar: 230, at most 5 wrong); no agent ever held a wrong total | **failed**: 186/256 exact, 70 wrong (first attempt; no second attempt yet) |
 
 What we learned beyond "it works":
 - Perfect flooding never finishes across slow links (it overwrites pairs before they are delivered); tree and ring
@@ -550,7 +550,12 @@ What we learned beyond "it works":
   with no error anywhere. The second tree, grown from another root, is what exposed it.
 - The ring sum has no such cross-check, and it failed on both models: one wrong addition is carried on faithfully by
   everyone downstream. The second attempt has the host keep each agent's ring results and refuse any ring write that
-  breaks the stated rules. That is more host help than the tree gets, and its result must be read that way.
+  breaks the stated rules. That is more host help than the tree gets, and its result must be read that way. With it,
+  the 27B passed on 256 agents.
+- On the 27B, two trees did not save the tree: both slipped the same way. The method says to report up only once
+  everything below has answered, but agents reported early and never revised. The two trees disagreed and 94 agents
+  rightly gave no number. The fix in the older literature (Dijkstra and Scholten 1980; Chang 1982) is a once-only rule:
+  a node reports exactly once, after every child's report is final. The next run has the host enforce it.
 
 Help given beyond section 10's recipe: the method text, the typed write, the host doing the additions, a host-designated
 root, being told that p_i and q_i lead to the same neighbour (tree) or that q_d leads round a ring back to p_d (ring), and a
