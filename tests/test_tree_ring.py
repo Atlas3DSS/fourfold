@@ -114,6 +114,42 @@ class TreeRing(unittest.TestCase):
             for a in last["agents"]:
                 self.assertTrue(a["protocol"].startswith(f"total {meta['answer']} over 16 processes"), a["protocol"])
 
+    def test_scripted_tree_is_never_refused_by_the_once_only_check(self):
+        for roots in ([0], [0, 10]):
+            sim.RUNS = Path(tempfile.mkdtemp(dir=self.tmp.name))
+            meta, states = self.world(protocol_hint="tree", tree_roots=roots, tree_check=True, scripted={"kind": "tree", "miss_rate": 0.0})
+            recs = self.run_to(meta, states, 16)
+            refused = [x for r in recs for a in r["agents"] for x in a.get("actions", []) if x.get("rejected")]
+            self.assertEqual(refused, [])
+            for a in recs[-1]["agents"]:
+                self.assertTrue(a["protocol"].startswith(f"total {meta['answer']} over 16 processes"), a["protocol"])
+            self.assertIn("never changes", sim.system_prompt(meta, meta["agents"][1]["seed"]))
+
+    def test_once_only_check_refuses_the_slips_seen_on_the_27b(self):
+        self.world()
+        tp = lambda text: sim.tree_to_port(text, sim.ZERO, "empty")[0]
+        st = sim.AgentState(id=1, seed="aa")
+        st.out_types = ["tree"] * 4
+        outs = [sim.ZERO, tp("A wave"), tp("A wave"), tp("A wave")]           # q0 is the parent's output
+        ent = lambda text, prev=sim.ZERO: sim.tree_to_port(text, prev, "tree")[2]
+        st.tree_in = [{}, {"A": ("sub", 899, 2)}, {"A": ("wave", 0, 0)}, {}]       # p3 has not answered
+        self.assertIn("p3 shows no A entry", sim.tree_check_write(st, 0, {}, ent("A sub 1020 3"), outs))   # reporting early
+        st.tree_in[3] = {"A": ("wave", 0, 0)}
+        self.assertEqual(sim.tree_check_write(st, 0, {}, ent("A sub 1020 3"), outs), "")
+        self.assertIn("parent's output", sim.tree_check_write(st, 1, {"A": ("wave", 0, 0)}, ent("A sub 5 1", outs[1]), outs))
+        outs[0] = tp("A sub 1020 3")
+        self.assertIn("final", sim.tree_check_write(st, 0, {"A": ("sub", 1020, 3)}, ent("A sub 1120 3", outs[0]), outs))  # changing it
+        self.assertIn("final", sim.tree_check_write(st, 0, {"A": ("sub", 1020, 3)}, ent("A wave", outs[0]), outs))
+        self.assertIn("copy the total", sim.tree_check_write(st, 0, {"A": ("sub", 1020, 3)}, ent("A total 49689 100", outs[0]), outs))
+        st.tree_in[2] = {"A": ("total", 49689, 100)}
+        self.assertEqual(sim.tree_check_write(st, 0, {"A": ("sub", 1020, 3)}, ent("A total 49689 100", outs[0]), outs), "")
+        root = sim.AgentState(id=0, seed="bb", tree_root="A")
+        root.out_types = ["tree"] * 4
+        routs = [tp("A wave")] * 4
+        root.tree_in = [{"A": ("sub", 5, 1)}, {"A": ("sub", 5, 1)}, {"A": ("wave", 0, 0)}, {}]
+        self.assertIn("all four inputs", sim.tree_check_write(root, 0, {"A": ("wave", 0, 0)}, ent("A total 20 3", routs[0]), routs))
+        self.assertIn("root of tree A", sim.tree_check_write(root, 0, {"A": ("wave", 0, 0)}, ent("A sub 20 3", routs[0]), routs))
+
     def test_scripted_ring_on_the_tesseract(self):
         meta, states = self.world(rows=9, cols=9, topology="tesseract", side=3, protocol_hint="ring",
                                   scripted={"kind": "ring", "miss_rate": 0.0})

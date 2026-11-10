@@ -164,3 +164,25 @@ traced to them and v2 does not refuse them (follow-up).
 Haiku ring v2 was stopped (the fix goes to the 27B first): the 16-agent smoke
 `haiku-tess2-ring-smoke-v2-1110` had all 16 holding the right total at tick 10 with 1 refused write when it was stopped; it
 was never evaluated, so it is not a result.
+
+## Third amendment: the once-only rule, enforced by the host (2026-11-10 ~18:00Z, bars frozen before any run)
+
+The 27B two-tree run failed because agents broke two rules the method already states ("never write a sub before all
+three have answered, and never change it afterwards"). The older literature's answer (Dijkstra and Scholten 1980; Chang
+1982; Segall 1983) is that a node reports exactly once, after every child's report is final. With `tree_check = true` the
+host now enforces that, as it enforces the ring rules in the second amendment:
+- a sub goes only on the parent's output, only once the other three inputs all show an entry for that tree;
+- a sub, once written, never changes (only that tree's total may replace it);
+- the root writes its total only once all four inputs show an entry; any other agent's total must copy one on an input.
+A refused write is not made and the agent is told why. The host does not check whether the sum is right: a sub that
+adds the wrong entries is still accepted. One sentence is added to the method text saying the host checks. Perfect
+scripted agents are never refused (10x10 and 20x20, one and two trees, 0%, 5% and 20% missed replies; same ticks as
+before). Code: `tree_check_write` in `sim.py`; tests in `tests/test_tree_ring.py`.
+
+| arm | world | pass bar |
+|---|---|---|
+| T-once smoke | 4x4 torus, two trees, roots 0 and 10, same seed | 16/16 exact, 0 wrong (gate: the 10x10 runs only if this passes) |
+| T-once | 10x10 torus, two trees, roots 0 and 55, same seed | at least 90/100 exact by tick 60, 0 wrong (the T-verify bar) |
+
+Qwen3.8-27B, medium thinking, the same recipe and prompt as `q-10x10-torus-sum-tree-verify-1110` apart from the sentence
+above; served on seven Flare servers instead of four, which changes speed but not the prompts.

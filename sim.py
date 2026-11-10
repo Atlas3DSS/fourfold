@@ -81,6 +81,9 @@ DEFAULTS = {
                                     # write as="tree", roots in tree_roots) or "ring" (tesseract: one ring per port, as="ring")
     "tree_roots": [],               # protocol_hint "tree": agent indices (0-based) that start tree A, tree B. two roots = the
                                     # verified arm: an agent trusts the total only when both trees agree
+    "tree_check": False,            # protocol_hint "tree": the host enforces the once-only rule (Dijkstra-Scholten): a sub is
+                                    # written once, on the parent's output, only after all three other inputs answered, and never
+                                    # changes; a total is the root's (all four answered) or copied from an input
     "stop_when_done": False,        # tree and ring arms: end the run once every agent holds a typed total (whatever its value)
     "scripted": {"kind": "flood", "miss_rate": 0.0},   # agent "scripted": perfect no-llm agents (scripted.py): flood, tree or ring;
                                     # miss_rate = chance an agent gives no reply on a tick
@@ -237,6 +240,7 @@ class AgentState:
     secret: int = 0                                  # task "sum": the agent's private number (the host checks ring writes against it)
     ring_res: dict = field(default_factory=dict)     # ring arm: ring d -> (sum, count), the first own entry to come home on p_d
     ring_in: list = field(default_factory=list)      # ring arm: per input port, the ring entries it shows this tick
+    tree_in: list = field(default_factory=list)      # tree arm with tree_check: per input port, the tree entries it shows this tick
     pool: str = ""                                   # mixed sizes: which model pool serves this agent
     fs: object = None                                # tools.AgentFS when actions are on
     action_results: list = field(default_factory=list)   # shown to the agent next tick
@@ -497,6 +501,9 @@ def protocol_text(cfg: dict, agent: dict) -> str:
     elif len(roots) == 2:
         root += f"\ntree {'B' if mine == ['A'] else 'A'} starts at another process."
     out = TREE_TEXT.replace("{root}", root)
+    if cfg.get("tree_check"):
+        out += ("\nthe host checks every tree write against these rules and refuses one that breaks them, telling you why: a sub is "
+                "written once, on the parent's output, only after the other three inputs have answered, and never changes.")
     return out + ("\n" + TREE_TWO if len(roots) == 2 else "")
 
 
@@ -921,7 +928,47 @@ def ring_check_write(st: "AgentState", d: int, ent: list) -> str:
     return ""
 
 
-def run_actions(raw: str, st: "AgentState", outs: list, ring_check: bool = False) -> tuple[list, list, list, set]:
+def tree_check_write(st: "AgentState", port: int, before: dict, after: dict, outs: list) -> str:
+    """the once-only rule for tree writes, checked by the host: '' if the write to q_port keeps it, else why not.
+    a sub is final the moment it is written, so the agent's own outputs say whether one exists (nothing extra to save)."""
+    mine = [port_tree(outs[j]) if st.out_types[j] == "tree" else {} for j in range(4)]
+    ins = st.tree_in if len(st.tree_in) == 4 else [{}] * 4
+    for x, e in after.items():
+        if before.get(x) == e:
+            continue
+        kind, s, c = e
+        if before.get(x, ("",))[0] == "sub" and kind != "total":
+            return (f"your {x} sub on q{port} ({before[x][1]} {before[x][2]}) is final and can never change; only '{x} total' "
+                    f"may replace it, once a total reaches you")
+        if kind == "sub":
+            if x in st.tree_root:
+                return f"you are the root of tree {x}: you write '{x} total', never '{x} sub'"
+            held = next((j for j in range(4) if j != port and mine[j].get(x, ("",))[0] == "sub"), None)
+            if held is not None:
+                return f"you already sent your {x} sub on q{held} ({mine[held][x][1]} {mine[held][x][2]}); it is final"
+            rest = [j for j in range(4) if j != port]
+            if not all(mine[j].get(x, ("",))[0] == "wave" for j in rest):
+                return f"a {x} sub goes only on your parent's output, after '{x} wave' is on your other three outputs"
+            missing = [f"p{j}" for j in rest if x not in ins[j]]
+            if missing:
+                return (f"{', '.join(missing)} show{'s' if len(missing) == 1 else ''} no {x} entry yet: wait until all three "
+                        f"have answered, then write your {x} sub once")
+        elif kind == "total":
+            if x in st.tree_root:
+                missing = [f"p{j}" for j in range(4) if x not in ins[j]]
+                if missing:
+                    return (f"{', '.join(missing)} show{'s' if len(missing) == 1 else ''} no {x} entry yet: as the root, wait "
+                            f"until all four inputs have answered, then write '{x} total' once")
+            else:
+                arrived = sorted({(t[1], t[2]) for t in (i.get(x) for i in ins) if t and t[0] == "total"})
+                if (s, c) not in arrived:
+                    return (f"no input shows '{x} total {s} {c}': copy the total exactly as it arrives"
+                            + (f" (an input shows '{x} total {arrived[0][0]} {arrived[0][1]}')" if arrived else
+                               f"; no '{x} total' has reached you yet"))
+    return ""
+
+
+def run_actions(raw: str, st: "AgentState", outs: list, ring_check: bool = False, tree_check: bool = False) -> tuple[list, list, list, set]:
     """execute the five actions in the order written. -> (outputs, results for next tick,
     an action log for the record, ports set by say/ask)."""
     import tools
@@ -965,9 +1012,12 @@ def run_actions(raw: str, st: "AgentState", outs: list, ring_check: bool = False
                 continue
             if astype in ("tree", "ring"):
                 if astype == "tree":
+                    before = port_tree(outs[port]) if st.out_types[port] == "tree" else {}
                     v, why, ent = tree_to_port(m.group("text"), outs[port], st.out_types[port],
                                                [port_tree(outs[j]) if st.out_types[j] == "tree" else {} for j in range(4) if j != port],
                                                st.tree_root)
+                    if v is not None and tree_check and (bad := tree_check_write(st, port, before, ent, outs)):
+                        v, why = None, bad
                     shown = tree_text(ent)
                 else:
                     v, why, ent = ring_to_port(m.group("text"))
@@ -1521,6 +1571,9 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         changed = [x != y for x, y in zip(inp, st.prev_inputs)]
         st.history.append(inp)
         del st.history[:-HISTORY]
+        if cfg.get("protocol_hint") == "tree" and cfg.get("say_only") and cfg.get("tree_check"):
+            st.tree_in = [port_tree(v) if l and states[l["agent"]].out_types[l["port"]] == "tree" else {}
+                          for v, l in zip(inp, world[st.id]["links"])]
         if cfg.get("protocol_hint") == "ring" and cfg.get("say_only"):
             st.ring_in = [port_ring(v) if l and states[l["agent"]].out_types[l["port"]] == "ring" else []
                           for v, l in zip(inp, world[st.id]["links"])]
@@ -1570,7 +1623,8 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
                                                                ports=not cfg.get("say_only"))
             errors += perr
             if cfg.get("actions"):
-                outs, results, alog, said = run_actions(acted, st, outs, ring_check=cfg.get("protocol_hint") == "ring")
+                outs, results, alog, said = run_actions(acted, st, outs, ring_check=cfg.get("protocol_hint") == "ring",
+                                                        tree_check=cfg.get("protocol_hint") == "tree" and bool(cfg.get("tree_check")))
                 if said:
                     st.last_write_tick = t
                 if said:   # a port written by say/ask needs no <qN> tag
