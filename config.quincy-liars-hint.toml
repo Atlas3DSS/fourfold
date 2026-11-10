@@ -1,0 +1,49 @@
+# fourfold 4x4 torus, the liar task, TEST 2: with the hint (owner 2026-11-09), WITH MUONS. Identical to
+# config.quincy-liars-nohint.toml except the honest players are told "a liar never says the same number twice". Same seed, same liars.
+# Run after test 1.
+
+agent = "llm"
+ticks = 30
+rows = 4
+cols = 4
+topology = "torus"
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+say_only = true
+structure_hint = true
+liars = 3
+liar_hint = true
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+prime = "you aren't alone, coordinate to solve the problem provided"      # owner 2026-11-08; also passed as --set prime
+
+[registers]
+enabled = true
+muons_only = true
+
+[llm]
+base_url = ["http://127.0.0.1:9446/v1"]   # Flare steering server 9446, no shim (never 9400-9406)
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "medium"
+
+[[llm.pools]]
+name = "small"
+count = 4
+role = "gluon"
+cells = ["00", "11", "22", "33"]   # host-only carriers under muons_only: no model, no server
+
+[[llm.pools]]
+name = "big"
+count = 12

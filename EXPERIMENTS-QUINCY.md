@@ -521,6 +521,42 @@ host keeps a ledger of what arrived on each port and a notes table the agent set
 event in the tick record, so the trail is deterministic and auditable. The persona-chat trial of the pulse and lace recipes is in
 `experiments/quincy/think/persona-recipes/REPORT.md`; the arm evals are under `experiments/quincy/think/bridge-1109/`.
 
+### 11. Tree and ring sums instead of flooding (2026-11-10)
+
+The recipe that solved the 4x4 (section 10) floods id:number pairs: every agent collects every other agent's number. On
+100 agents it got 0 of 100 at tick 60, with each agent holding about 90 of the 100 numbers. That is the channel, not the
+model: a port carries two pairs a tick, so even perfect scripted agents need N/2 ticks (50 for 100 agents, 128 for the
+256-agent tesseract), and every agent's prompt grows with the crowd. The finding, the scripted model
+(`experiments/flooding_model/`) and the pointers to the older literature came from a literature review in a sister
+project: tree and prefix reductions (Hillis and Steele 1986) and the echo, or convergecast, wave (Chang 1982; Segall 1983).
+
+So only the method changed. Agents are told how to add up along a tree: one agent starts a wave, each agent takes the
+neighbour it first heard from as its parent, each sends one (sum, count) message up once everything below it has
+answered, and the root sends the total back down. The host packs the message and does the additions. Pass bars were
+frozen before any model result was read; the full record, including two amendments made afterwards and why, is in
+[`TREE-RING-1109.md`](TREE-RING-1109.md).
+
+| arm | Qwen3.8-27B | Claude Haiku 5.5 |
+|---|---|---|
+| 10x10 torus, one tree | **100/100 exact, 0 wrong**, all at tick 33 (perfect agents: 32); 202 s a tick against 375 s flooding | **100/100 exact**, tick 34 |
+| 10x10 torus, two trees that must agree | paused at tick 9 behind the tesseract run | first attempt failed (one tree silently lost a branch of 11; the other tree exposed it); after a host check, **100/100**, tick 48 |
+| 4x28 torus, 7 arrays, links that deliver every 2nd tick | not run | **112/112 exact**, tick 64 (perfect: 50), about half the tokens of flooding, which got 0/112 |
+| tesseract, 256 agents, one ring per port | 16-agent smoke test **failed** (0/16), so the 256 run was skipped. Second attempt with host-checked ring writes: smoke **16/16**; the 256-agent run is in progress | **failed**: 186/256 exact, 70 wrong (first attempt; no second attempt yet) |
+
+What we learned beyond "it works":
+- Perfect flooding never finishes across slow links (it overwrites pairs before they are delivered); tree and ring
+  entries stay on the port, so slow links only delay them.
+- A tree's weakness is real and silent. One agent waved at its own parent and 11 agents dropped out of one tree's count,
+  with no error anywhere. The second tree, grown from another root, is what exposed it.
+- The ring sum has no such cross-check, and it failed on both models: one wrong addition is carried on faithfully by
+  everyone downstream. The second attempt has the host keep each agent's ring results and refuse any ring write that
+  breaks the stated rules. That is more host help than the tree gets, and its result must be read that way.
+
+Help given beyond section 10's recipe: the method text, the typed write, the host doing the additions, a host-designated
+root, being told that p_i and q_i lead to the same neighbour (tree) or that q_d leads round a ring back to p_d (ring), and a
+decoded view of the agent's own outputs each tick. One seed (20261108) per arm. A short film of this section is in
+[`film/`](film/).
+
 ## What's next
 
 - **Registers and gluons** (section 9): rerun with the new instruction test, then remove our help one piece at a time, then

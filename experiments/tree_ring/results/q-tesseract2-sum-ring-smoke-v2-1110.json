@@ -1,0 +1,48 @@
+{
+ "run": "q-tesseract2-sum-ring-smoke-v2-1110",
+ "agents": 16,
+ "ticks": 9,
+ "true_sum": 6637,
+ "first_exact": 9,
+ "all_exact": 9,
+ "exact_at_end": 16,
+ "agents_ever_holding_a_wrong_total": 0,
+ "rejected_writes": 2,
+ "no_reply_turns": 0,
+ "median_prompt_tokens": {
+  "t1": 1981,
+  "t10": null,
+  "t30": null,
+  "t60": null
+ },
+ "median_tick_prompt_chars": {
+  "t1": 825,
+  "t10": null,
+  "t30": null,
+  "t60": null
+ },
+ "median_seconds_per_tick": 113.7,
+ "exact_by_tick": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  16
+ ],
+ "eval_t9": {
+  "exact": 16,
+  "wrong": 0,
+  "no_number": 0,
+  "wrong_values": [],
+  "count_answers_min_median_max": [
+   16,
+   16,
+   16
+  ],
+  "count_exact": 16
+ }
+}

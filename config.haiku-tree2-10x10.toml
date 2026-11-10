@@ -1,0 +1,30 @@
+# #440: Claude Haiku 5.5 on the 10x10 torus sum task with a tree sum (convergecast) instead of flooding. Bridge recipe unchanged
+# (typed host-packed writes only, structure sentence, same prime and eval line, seed 20261108); only the method changes:
+# protocol_hint = "tree", root(s) [0, 55] host-designated. Each turn is a headless claude -p, thinking adaptive at effort medium.
+
+agent = "claudecode"
+ticks = 60
+rows = 10
+cols = 10
+topology = "torus"
+world_seed = 20261108
+task = "sum"
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+say_only = true
+structure_hint = true
+protocol_hint = "tree"
+tree_roots = [0, 55]
+eval_line = "this eval is for multi agentic long running coordination."
+prime = "you aren't alone, coordinate to solve the problem provided"
+
+[claudecode]
+model = "claude-haiku-5-5"
+effort = "medium"
+thinking = "adaptive"
+bin = "claude"
+timeout = 300
+retries = 2
+max_concurrency = 16

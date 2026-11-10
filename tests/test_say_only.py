@@ -184,6 +184,72 @@ class SayOnly(unittest.TestCase):
         self.assertIn("as=\"pairs\"", sim.system_prompt(meta, meta["agents"][0]["seed"]))
         self.assertIn("up to 2 id:number pairs", sim.system_prompt(meta, meta["agents"][0]["seed"]))
 
+    def test_liars_are_picked_prompted_and_never_repeat_a_number(self):
+        meta, states = self.world(liars=3)
+        liars = [a for a in meta["agents"] if a.get("liar")]
+        self.assertEqual(len(liars), 3)
+        self.assertEqual(meta["liars"], sorted(a["seed"] for a in liars))
+        self.assertEqual(meta["answer"], sum(a["secret"] for a in meta["agents"] if not a.get("liar")))
+        honest = next(a for a in meta["agents"] if not a.get("liar"))
+        hp = sim.system_prompt(meta, honest["seed"]); lp = sim.system_prompt(meta, liars[0]["seed"])
+        self.assertIn("some processes are liars", hp); self.assertNotIn("never says the same number twice", hp)
+        self.assertIn("you are a liar", lp); self.assertIn("different number from any you have given before", lp)
+        # the liar's own pair gets a fresh number every time; a pair about someone else is left alone
+        li = liars[0]["id"]; st = states[li]; self.assertTrue(st.liar)
+        seen = set()
+        for t in range(1, 6):
+            tick = asyncio.run(sim.step(t, meta, states, Scripted(f'<log>x</log><write port="q0" as="pairs">{liars[0]["seed"]}:416, {honest["seed"]}:{honest["secret"]}</write>')))
+            pairs = sim.port_pairs(tick["agents"][li]["outputs"][0])
+            self.assertEqual(pairs[1], (honest["seed"], honest["secret"]))
+            self.assertEqual(pairs[0][0], liars[0]["seed"]); self.assertNotEqual(pairs[0][1], 416); self.assertNotIn(pairs[0][1], seen); seen.add(pairs[0][1])
+            self.assertEqual(tick["agents"][li]["liar_said"], sorted(seen, key=lambda x: st.liar_said.index(x)))
+        again = sim.restore_states(meta, [tick]); self.assertEqual(again[li].liar_said, st.liar_said); self.assertTrue(again[li].liar)
+        # honest agents are untouched
+        hid = honest["id"]
+        tick = asyncio.run(sim.step(6, meta, states, Scripted(f'<log>x</log><write port="q0" as="pairs">{honest["seed"]}:{honest["secret"]}</write>')))
+        self.assertEqual(sim.port_pairs(tick["agents"][hid]["outputs"][0]), [(honest["seed"], honest["secret"])])
+
+    def test_liar_hint_is_one_sentence(self):
+        meta, _ = self.world(liars=2, liar_hint=True)
+        honest = next(a for a in meta["agents"] if not a.get("liar"))
+        self.assertIn("a liar never says the same number twice", sim.system_prompt(meta, honest["seed"]))
+
+    def muon_world(self, **over):
+        cfg = copy.deepcopy(sim.DEFAULTS)
+        cfg.update(agent="echo", rows=4, cols=4, topology="torus", world_seed=7, actions=True, task="sum", say_only=True, liars=3)
+        cfg["registers"].update(enabled=True, muons_only=True)
+        cfg["llm"]["pools"] = [{"name": "small", "count": 4, "role": "gluon", "cells": ["00", "11", "22", "33"]}, {"name": "big", "count": 12}]
+        cfg.update(over)
+        sim.set_width(cfg)
+        _, meta = sim.new_run(cfg, "run")
+        return meta, sim.restore_states(meta, [])
+
+    def test_muons_only_liars_skip_gluons_and_prose_writes_are_refused(self):
+        if "registers.INERT" not in Path(sim.__file__).read_text(encoding="utf-8"):
+            self.skipTest("muons patch not applied")
+        import registers
+        meta, states = self.muon_world()
+        gluons = [a for a in meta["agents"] if registers.is_gluon(a)]; liars = [a for a in meta["agents"] if a.get("liar")]
+        self.assertEqual(len(gluons), 4); self.assertEqual(len(liars), 3)
+        self.assertFalse(any(a.get("liar") for a in gluons))
+        self.assertEqual(meta["answer"], sum(a["secret"] for a in meta["agents"] if not registers.is_gluon(a) and not a.get("liar")))
+        honest = next(a for a in meta["agents"] if not registers.is_gluon(a) and not a.get("liar"))
+        prompt = sim.system_prompt(meta, honest["seed"])
+        self.assertNotIn('<say port="q1">', prompt); self.assertIn('as="pairs"', prompt); self.assertIn("no words on ports", prompt)
+        tick = asyncio.run(sim.step(1, meta, states, Scripted('<log>x</log><say port="q0">hello</say><write port="q1" as="int">5</write>')))
+        a = tick["agents"][honest["id"]]
+        self.assertEqual(a["outputs"][0], "0" * 32); self.assertEqual(int(a["outputs"][1], 16), 5)
+        self.assertIn("refused: ports carry numbers", " ".join(a["action_results"]))
+
+    def test_liar_prose_never_repeats_a_number(self):
+        st = sim.AgentState(id=0, seed="e52ba3af", liar=True)
+        out1 = sim.liar_prose(st, 'x <move process="ab" to="cd">my number is 416, really 416</move> y')
+        self.assertNotIn("416, really 416", out1); self.assertEqual(st.liar_said[0], 416); self.assertEqual(len(st.liar_said), 2)
+        out2 = sim.liar_prose(st, '<move process="ab" to="cd">it is 416</move>')
+        self.assertNotIn("416", out2); self.assertEqual(len(st.liar_said), 3)
+        self.assertEqual(sim.liar_prose(sim.AgentState(id=1, seed="aa", liar=False), '<move process="ab" to="cd">416</move>'), '<move process="ab" to="cd">416</move>')
+        self.assertEqual(sim.liar_prose(st, "no move tags 416"), "no move tags 416")
+
 
 if __name__ == "__main__":
     unittest.main()

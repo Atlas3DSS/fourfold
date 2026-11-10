@@ -214,6 +214,15 @@ def score_agent(meta: dict, k: int, answer: str) -> dict:
         mm = re.search(r"-?\d[\d,]*", tag(answer, "sum") or "")
         claim = int(mm.group(0).replace(",", "")) if mm else None
         task = {"sum_claim": claim, "sum_true": meta["answer"], "sum_score": float(claim == meta["answer"])}
+        if meta.get("liars") is not None:            # the liar task: who and how many
+            true_l = set(meta["liars"])
+            mm = re.search(r"\d+", tag(answer, "liar_count") or "")
+            lc = int(mm.group(0)) if mm else None
+            said = set(re.findall(r"\b[0-9a-f]{8}\b", (tag(answer, "liars") or "").lower()))
+            tp = len(said & true_l); prec = tp / len(said) if said else 0.0; rec = tp / len(true_l) if true_l else 1.0
+            task.update(liar_count_claim=lc, liar_count_true=len(true_l), liar_count_score=float(lc == len(true_l)),
+                        liars_claim=sorted(said), liars_true=sorted(true_l), liars_exact=float(said == true_l),
+                        liars_precision=round(prec, 3), liars_recall=round(rec, 3), is_liar=bool(a.get("liar")))
     return {**task,
         "agent": k + 1, "seed": a["seed"], "pos": a["pos"], "true_role": true_role,
         "count": count, "count_score": round(s_count, 3),
@@ -233,7 +242,11 @@ async def ask_all(meta: dict, ticks: list[dict], eval_tpl: str) -> tuple[int, li
     inputs = sim.read_inputs(meta["agents"], states)   # what they'd see if the run went on
     shown = meta["config"]["log_lines_shown"]
     turns = []
+    import registers
+    gluon_rows = {st.id for st, a in zip(states, meta["agents"]) if registers.muons_only(meta["config"]) and registers.is_gluon(a)}
     for st, inp in zip(states, inputs):
+        if st.id in gluon_rows:
+            continue                                           # a small process under muons_only: no model, no answer
         vals = {"t": t, "protocol": st.protocol.strip() or "(empty)",
                 "recent_log": "\n".join(f"t{tt}: {l}" for tt, l in st.log[-shown:]) or "(empty)"}
         for i in range(4):
@@ -316,7 +329,11 @@ def main():
     if not ticks:
         sys.exit("no ticks to evaluate")
     eval_tpl = (ROOT / "prompts" / "eval.txt").read_text(encoding="utf-8")
-    if meta["config"].get("task") == "sum":
+    if meta["config"].get("task") == "sum" and int(meta["config"].get("liars") or 0):
+        eval_tpl += ("<sum>the sum of the private numbers of the honest processes. one number.</sum>\n"
+                     "<liar_count>how many processes are liars. one number.</liar_count>\n"
+                     "<liars>the ids of the liars, separated by spaces. \"none\" if none.</liars>\n")
+    elif meta["config"].get("task") == "sum":
         eval_tpl += "<sum>the sum of the private numbers of all processes. one number.</sum>\n"
     if args.naming:
         naming_report(meta, ticks)
@@ -372,6 +389,11 @@ def main():
         right = sum(s.get("sum_score", 0) for s in scored)
         claims = sorted((s.get("sum_claim") for s in scored), key=lambda x: (x is None, x))
         print(f"\ntask: sum of private numbers = {meta['answer']}; exactly right: {int(right)}/{len(scored)}")
+        if meta.get("liars") is not None:
+            honest = [x for x in scored if not x.get("is_liar")]
+            print(f"  liars: {len(meta['liars'])} ({' '.join(meta['liars'])}); honest agents naming the exact set: "
+                  f"{int(sum(x.get('liars_exact', 0) for x in honest))}/{len(honest)}; right count: {int(sum(x.get('liar_count_score', 0) for x in honest))}/{len(honest)}; "
+                  f"honest agents with the honest sum: {int(sum(x.get('sum_score', 0) for x in honest))}/{len(honest)}")
         print("  answers given:", claims[:40], "..." if len(claims) > 40 else "")
     print(f"\nsaved {out}")
 

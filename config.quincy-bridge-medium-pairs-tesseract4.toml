@@ -1,0 +1,35 @@
+# fourfold tesseract of side 4: a directed 4-torus, 256 agents, one port per dimension (owner 2026-11-09: "then the tesseract").
+# The recipe that solved the 4x4: bridge (typed host-packed writes only), medium thinking, no stop pulse, structure sentence,
+# typed id:number pairs, notes cap 400. Seven Flare steering servers (9450-9456), 28 replies in flight. Directed diameter 12.
+
+agent = "llm"
+ticks = 60
+rows = 16
+cols = 16
+topology = "tesseract"
+side = 4
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+say_only = true
+structure_hint = true
+notes_max = 400
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+prime = "you aren't alone, coordinate to solve the problem provided"      # owner 2026-11-08; also passed as --set prime
+
+[llm]
+base_url = ["http://127.0.0.1:9450/v1", "http://127.0.0.1:9451/v1", "http://127.0.0.1:9452/v1", "http://127.0.0.1:9453/v1", "http://127.0.0.1:9454/v1", "http://127.0.0.1:9455/v1", "http://127.0.0.1:9456/v1"]
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "medium"

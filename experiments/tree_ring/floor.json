@@ -1,0 +1,211 @@
+[
+ {
+  "world": "4x4 torus",
+  "method": "flood",
+  "n": 16,
+  "first": 8,
+  "all": 9,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 16,
+  "tick_chars": 2034
+ },
+ {
+  "world": "4x4 torus",
+  "method": "tree",
+  "n": 16,
+  "first": 10,
+  "all": 14,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 16,
+  "tick_chars": 1151
+ },
+ {
+  "world": "4x4 torus",
+  "method": "tree2",
+  "n": 16,
+  "first": 12,
+  "all": 14,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 16,
+  "tick_chars": 1486
+ },
+ {
+  "world": "8x8 torus",
+  "method": "flood",
+  "n": 64,
+  "first": 32,
+  "all": 33,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 64,
+  "tick_chars": 2354
+ },
+ {
+  "world": "8x8 torus",
+  "method": "tree",
+  "n": 64,
+  "first": 18,
+  "all": 26,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 64,
+  "tick_chars": 1286
+ },
+ {
+  "world": "8x8 torus",
+  "method": "tree2",
+  "n": 64,
+  "first": 22,
+  "all": 26,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 64,
+  "tick_chars": 1672
+ },
+ {
+  "world": "10x10 torus",
+  "method": "flood",
+  "n": 100,
+  "first": 50,
+  "all": 51,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 100,
+  "tick_chars": 2358
+ },
+ {
+  "world": "10x10 torus",
+  "method": "tree",
+  "n": 100,
+  "first": 22,
+  "all": 32,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 100,
+  "tick_chars": 1299
+ },
+ {
+  "world": "10x10 torus",
+  "method": "tree2",
+  "n": 100,
+  "first": 27,
+  "all": 32,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 100,
+  "tick_chars": 1722
+ },
+ {
+  "world": "4x28 torus, 7 arrays, seams every 2",
+  "method": "flood",
+  "n": 112,
+  "first": 60,
+  "all": null,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 32,
+  "tick_chars": 2131
+ },
+ {
+  "world": "4x28 torus, 7 arrays, seams every 2",
+  "method": "tree",
+  "n": 112,
+  "first": 34,
+  "all": 50,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 112,
+  "tick_chars": 1300
+ },
+ {
+  "world": "4x28 torus, 7 arrays, seams every 2",
+  "method": "tree2",
+  "n": 112,
+  "first": 42,
+  "all": 50,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 112,
+  "tick_chars": 1731
+ },
+ {
+  "world": "20x20 torus",
+  "method": "tree",
+  "n": 400,
+  "first": 42,
+  "all": 62,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 400,
+  "tick_chars": 1310
+ },
+ {
+  "world": "20x20 torus",
+  "method": "tree2",
+  "n": 400,
+  "first": 52,
+  "all": 62,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 400,
+  "tick_chars": 1753
+ },
+ {
+  "world": "tesseract side 3",
+  "method": "flood",
+  "n": 81,
+  "first": 40,
+  "all": 40,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 81,
+  "tick_chars": 2411
+ },
+ {
+  "world": "tesseract side 3",
+  "method": "ring",
+  "n": 81,
+  "first": 13,
+  "all": 13,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 81,
+  "tick_chars": 1520
+ },
+ {
+  "world": "tesseract side 4",
+  "method": "flood",
+  "n": 256,
+  "first": 128,
+  "all": 128,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 256,
+  "tick_chars": 2468
+ },
+ {
+  "world": "tesseract side 4",
+  "method": "ring",
+  "n": 256,
+  "first": 17,
+  "all": 17,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 256,
+  "tick_chars": 1803
+ },
+ {
+  "world": "tesseract side 5",
+  "method": "ring",
+  "n": 625,
+  "first": 21,
+  "all": 21,
+  "wrong": 0,
+  "rejected": 0,
+  "exact_at_cap": 625,
+  "tick_chars": 2073
+ }
+]

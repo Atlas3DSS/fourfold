@@ -871,6 +871,369 @@ class UnitGate(Base):
             self.assertEqual([x["prompt"] for x in a["agents"]], [x["prompt"] for x in b["agents"]])
 
 
+class GluonMoves(Base):
+    def build(self, rid, **over):
+        return Arrays.build(self, rid, **{"gluon_moves": True, **over})
+
+    def tick(self, meta, bank, t, **said):
+        '''said: cell_xy=text, what the node at cell xy adds to its reply this tick.'''
+        cells = {registers.address(a): a["id"] for a in meta["agents"]}
+        extra = {cells[k[5:]]: v for k, v in said.items()}
+        raws = [self.line(meta, i, extra=extra.get(i, "")) for i in range(len(meta["agents"]))]
+        return registers.apply_tick(meta, bank, t, raws)
+
+    def reciprocal(self, meta):
+        for a in meta["agents"]:
+            for l in a["links"]:
+                if l:
+                    self.assertEqual(meta["agents"][l["agent"]]["links"][l["port"]]["agent"], a["id"])
+
+    def test_a_muon_walks_one_hop_a_tick_and_ends_on_a_gluons_cell(self):
+        _, meta, at = self.build("walk")
+        bank = registers.bank_for(meta)
+        g, mid, o, big = at["10"], at["11"], at["12"], at["13"]
+        default = meta["config"]["registers"]["default_program"]
+        bank.programs[g["id"]], bank.programs[mid["id"]] = "copy p0 to q1", "copy p1 to q0"
+        snap, res = self.tick(meta, bank, 1, cell_13='<move process="10" to="12"/>')
+        self.assertEqual([e["kind"] for e in snap["events"]], ["muon"])
+        self.assertIn("on its way to 12", snap["news"][big["id"]][0])
+        self.assertEqual(bank.programs[g["id"]], default)      # it stops at once
+        self.assertEqual(registers.address(g), "10")
+        walked = []
+        for t in (2, 3):
+            snap, _ = self.tick(meta, bank, t)
+            walked.append(registers.address(g))
+            self.reciprocal(meta)
+        self.assertEqual(walked[1], "12")
+        self.assertEqual(registers._hops(meta, {"pos": [1, 0]}, g), 2)
+        self.assertEqual(bank.muons, [])
+        self.assertEqual(bank.programs[mid["id"]], "copy p1 to q0")   # displaced, and it keeps its instruction
+        self.assertIn("is now at 12", snap["news"][big["id"]][0])
+        self.assertEqual(sum(e["kind"] == "swap" for e in snap["events"]), 1)
+
+    def test_prose_arrives_exactly_and_the_muon_is_a_gluon_again_next_to_the_receiver(self):
+        _, meta, at = self.build("prose")
+        bank = registers.bank_for(meta)
+        g, sender = at["10"], at["13"]
+        words = 'meet at the seam, "not" in hex <out>ffff</out>  ok'
+        self.tick(meta, bank, 1, cell_13=f'<move process="10" to="23">{words}</move>')
+        self.assertEqual(bank.muons[0]["dest"], at["23"]["id"])
+        before = bank.out
+        self.assertEqual(before, "0000")      # a tag quoted in the prose was not an action
+        told = ""
+        for t in range(2, 9):
+            snap, _ = self.tick(meta, bank, t)
+            told += "\n".join(snap["news"][at["23"]["id"]])
+            if not bank.muons:
+                break
+        self.assertIn("has a message of", told)
+        self.assertIn(f"{sender['seed']} at 13, brought by {registers.address(g)}:\n{words}", told)
+        self.assertEqual(registers._hops(meta, g, at["23"]), 1)
+        self.assertEqual(snap["events"][-1]["prose"], words)
+        self.assertEqual(snap["events"][-1]["kind"], "muon_done")
+        self.assertIn("your message reached 23", "\n".join(snap["news"][sender["id"]]))
+
+    def test_nothing_can_stop_a_muon_and_it_avoids_big_nodes(self):
+        _, meta, at = self.build("clear")
+        bank = registers.bank_for(meta)
+        g = at["10"]
+        self.tick(meta, bank, 1, cell_13='<move process="10" to="33"/>')   # 13 and 23 sit in the way
+        for t in range(2, 30):
+            snap, _ = self.tick(meta, bank, t, cell_11='<no from="10"/>', cell_12='<no from="10"/>')
+            if not bank.muons:
+                break
+        self.assertEqual(registers.address(g), "33")
+        self.assertEqual({registers.address(at[c]) for c in ("13", "23", "14", "24")}, {"13", "23", "14", "24"})
+
+    def test_walled_in_it_goes_through_a_big_node_and_tells_it(self):
+        _, meta, at = self.build("wall")
+        bank = registers.bank_for(meta)
+        for c in ("01", "11", "21", "31"):
+            at[c]["role"] = ""
+        self.tick(meta, bank, 1, cell_13='<move process="10" to="12"/>')
+        bank.muons[0]["by"] = at["11"]["id"]
+        told = []
+        for t in range(2, 8):
+            snap, _ = self.tick(meta, bank, t)
+            told += [x for r in snap["news"] for x in r]
+            if not bank.muons:
+                break
+        self.assertEqual(registers.address(at["10"]), "12")
+        self.assertTrue(any("passed through you" in x for x in told))
+
+    def test_a_muon_moves_once_a_tick(self):
+        _, meta, at = self.build("once")
+        bank = registers.bank_for(meta)
+        g = at["00"]
+        self.tick(meta, bank, 1, cell_13='<move process="00" to="33"/>')
+        last = [0, 0]
+        for t in range(2, 8):
+            self.tick(meta, bank, t)
+            self.assertLessEqual(registers._hops(meta, {"pos": last}, g), 1)
+            last = list(g["pos"])
+
+    def test_only_the_destination_may_write_to_a_muon(self):
+        _, meta, at = self.build("write")
+        bank = registers.bank_for(meta)
+        g = at["00"]
+        self.tick(meta, bank, 1, cell_13='<move process="00" to="23">first</move>')
+        rx = at["23"]["id"]
+        for t, (cell, text) in enumerate((("13", '<move process="{}" to="12"/>'), ("14", '<move process="{}" to="12"/>'),
+                                          ("13", '<program to="{}">copy p0 to q1</program>')), start=2):
+            _, res = self.tick(meta, bank, t, **{f"cell_{cell}": text.format(registers.address(g))})
+            self.assertIn("only the process it is going to", res[at[cell]["id"]]["notices"][-1], text)
+            self.assertEqual((bank.muons[0]["to"], bank.muons[0]["prose"]), ("23", "first"))
+        _, res = self.tick(meta, bank, 5, cell_23=f'<move process="{registers.address(g)}" to="33"/>')
+        self.assertIn("only go to a big process", res[rx]["notices"][-1])    # it still carries prose
+        self.assertEqual(bank.muons[0]["to"], "23")
+        self.tick(meta, bank, 6, cell_23=f'<move process="{registers.address(g)}" to="13">changed</move>')
+        self.assertEqual((bank.muons[0]["dest"], bank.muons[0]["prose"], bank.muons[0]["by"]), (at["13"]["id"], "changed", rx))
+
+    def test_an_address_means_what_the_writer_saw_when_things_move_that_tick(self):
+        _, meta, at = self.build("seen")
+        bank = registers.bank_for(meta)
+        g, other = at["00"], at["01"]
+        self.tick(meta, bank, 1, cell_13='<move process="00" to="03"/>')
+        self.tick(meta, bank, 2, cell_13='<program to="01">copy p0 to q1</program>')  # g walks onto 01 this tick: this is other's
+        self.assertEqual(registers.address(g), "01")
+        self.assertEqual([v["target"] for v in bank.trials.values()], [other["id"]])
+
+    def test_any_big_node_can_send_any_gluon_in_any_array(self):
+        _, meta, at = self.build("anywhere")
+        bank = registers.bank_for(meta)
+        self.tick(meta, bank, 1, cell_13='<move process="05" to="06"/>')
+        self.assertEqual([m["g"] for m in bank.muons], [at["05"]["id"]])
+        at["00"]["pool"], at["00"]["role"] = "4b", ""                         # a 4b is treated the same
+        self.tick(meta, bank, 2, cell_00='<move process="07" to="17"/>')
+        self.assertIn(at["07"]["id"], [m["g"] for m in bank.muons])
+
+    def test_a_lone_muon_waits_at_the_seam_and_the_sender_is_told_once(self):
+        _, meta, at = self.build("lone")
+        bank = registers.bank_for(meta)
+        g, big = at["03"], at["13"]["id"]
+        self.tick(meta, bank, 1, cell_13='<move process="03" to="14">words</move>')
+        told, spots = [], set()
+        for t in range(2, 20):
+            snap, _ = self.tick(meta, bank, t)
+            told += snap["news"][big]
+            spots.add(g["module"])
+        self.assertEqual(spots, {0})                                          # it never crossed
+        self.assertEqual(sum("on a seam" in x for x in told), 1)
+        self.assertEqual(len(bank.muons), 1)
+        self.assertIn("waiting to cross to 04", registers.where_map(meta, bank, big))
+
+    def test_a_stander_carries_a_muon_across_and_goes_back_to_being_a_gluon(self):
+        _, meta, at = self.build("ferry")
+        bank = registers.bank_for(meta)
+        g, ferry, rx = at["03"], at["04"], at["14"]["id"]
+        self.tick(meta, bank, 1, cell_13='<move process="03" to="14">over the seam</move>')
+        for t in range(2, 6):
+            self.tick(meta, bank, t)
+        self.assertEqual(g["module"], 0)
+        self.tick(meta, bank, 6, cell_14='<move process="04" to="04" stay="yes"/>')
+        self.assertEqual(sorted(m["g"] for m in bank.muons), sorted([g["id"], ferry["id"]]))
+        self.assertIn("04 moving", registers.where_map(meta, bank, at["13"]["id"]))
+        snap, _ = self.tick(meta, bank, 7)
+        met = [e for e in snap["events"] if e.get("seam")]
+        self.assertEqual(len(met), 1)
+        self.assertTrue(met[0]["exchange"])
+        self.assertEqual((registers.address(g), registers.address(ferry)), ("04", "03"))   # nothing left behind on either side
+        self.assertEqual([m["g"] for m in bank.muons], [g["id"]])
+        self.assertEqual(ferry["module"], 0)
+        words = []
+        for t in range(8, 12):
+            snap, _ = self.tick(meta, bank, t)
+            words += snap["news"][rx]
+        self.assertIn("over the seam", "\n".join(words))
+        self.assertEqual(g["module"], 1)
+        self.reciprocal(meta)
+
+    def test_two_muons_crossing_opposite_ways_need_no_stander(self):
+        _, meta, at = self.build("cross")
+        bank = registers.bank_for(meta)
+        a, b = at["03"], at["04"]
+        self.tick(meta, bank, 1, cell_13='<move process="03" to="06"/><move process="04" to="01"/>')
+        snap, _ = self.tick(meta, bank, 2)
+        self.assertTrue(any(e.get("seam") for e in snap["events"]))
+        self.assertEqual((a["module"], b["module"]), (1, 0))
+
+    def test_next_to_a_receiver_across_a_seam_does_not_count(self):
+        _, meta, at = self.build("sidedoor")
+        bank = registers.bank_for(meta)
+        at["04"]["role"] = ""                                                 # a big node just over the seam from 03
+        self.tick(meta, bank, 1, cell_13='<move process="03" to="04">words</move>')
+        for t in range(2, 12):
+            snap, _ = self.tick(meta, bank, t)
+            self.assertEqual([e for e in snap["events"] if e["kind"] == "muon_done"], [])
+            self.assertIsNone(bank.muons[0]["arrived"])
+        self.assertEqual(at["03"]["module"], 0)
+
+    def test_only_the_node_that_stood_a_muon_can_release_it(self):
+        _, meta, at = self.build("release")
+        bank = registers.bank_for(meta)
+        self.tick(meta, bank, 1, cell_13='<move process="03" to="03" stay="yes"/>')
+        _, res = self.tick(meta, bank, 2, cell_23='<move process="03" to="02"/>')
+        self.assertIn("only the process it is going to", res[at["23"]["id"]]["notices"][0])
+        self.assertTrue(bank.muons[0]["stand"])
+        self.tick(meta, bank, 3, cell_13='<move process="03" to="02"/>')
+        self.assertFalse(bank.muons[0]["stand"])
+        self.tick(meta, bank, 4)
+        self.assertEqual((bank.muons, registers.address(at["03"])), ([], "02"))
+
+    def test_two_muons_head_on_swap_exact_states(self):
+        _, meta, at = self.build("meet")
+        bank = registers.bank_for(meta)
+        a, b = at["00"], at["01"]
+        self.tick(meta, bank, 1, cell_13='<move process="00" to="03"/><move process="01" to="00"/>')
+        snap, _ = self.tick(meta, bank, 2)
+        met = [e for e in snap["events"] if e.get("exchange")]
+        self.assertEqual(len(met), 1)
+        self.assertEqual((registers.address(a), registers.address(b)), ("01", "00"))
+        self.assertEqual([m["g"] for m in bank.muons], [a["id"]])     # b has reached its cell and is a gluon again
+
+    def test_a_muon_that_already_went_is_walked_around_not_a_stop(self):
+        _, meta, at = self.build("around")
+        bank = registers.bank_for(meta)
+        a, b = at["10"], at["01"]
+        self.tick(meta, bank, 1, cell_13='<move process="10" to="02"/><move process="01" to="12"/>')
+        for t in range(2, 12):
+            snap, _ = self.tick(meta, bank, t)
+            self.assertEqual([e for e in snap["events"] if e["kind"] == "muon_boxed"], [])
+            if not bank.muons:
+                break
+        self.assertEqual((registers.address(a), registers.address(b)), ("02", "12"))
+
+    def test_wait_is_capped_at_the_links_to_the_sender(self):
+        for rid, sender, waits_wanted, waits_got in (("w1", "13", 5, 1), ("w2", "03", 5, 2)):
+            _, meta, at = self.build(rid)
+            bank = registers.bank_for(meta)
+            at["03"]["role"] = "" if sender == "03" else "gluon"
+            g = at["03"] if sender == "13" else at["02"]
+            gaddr = registers.address(g)
+            rx = at["23"]["id"]
+            self.tick(meta, bank, 1, **{f"cell_{sender}": f'<move process="{gaddr}" to="23">hello</move>'})
+            t = 2
+            while not (bank.muons and bank.muons[0]["arrived"]):
+                self.tick(meta, bank, t)
+                t += 1
+            n = bank.muons[0]["n"]
+            self.assertEqual(n, registers._hops(meta, at["23"], at[sender]))
+            self.assertEqual(n, waits_got)
+            refused = 0
+            for _ in range(waits_wanted):
+                here = registers.address(g)
+                snap, res = self.tick(meta, bank, t, cell_23=f'<wait process="{here}"/>')
+                refused += any("the most it can" in x for x in res[rx]["notices"])
+                t += 1
+                if not bank.muons:
+                    break
+            self.assertEqual(bank.muons, [])
+            self.assertEqual(snap["events"][-1]["waits"], n)
+            self.assertIn("hello", "\n".join(snap["news"][rx]))
+            self.assertEqual(refused, 1)
+
+    def test_wait_only_from_the_receiver_of_a_muon_that_has_arrived(self):
+        _, meta, at = self.build("nowait")
+        bank = registers.bank_for(meta)
+        self.tick(meta, bank, 1, cell_13='<move process="00" to="23">hi</move>')
+        here = registers.address(at["00"])
+        _, res = self.tick(meta, bank, 2, cell_23=f'<wait process="{here}"/>')
+        self.assertIn("has not brought you anything", res[at["23"]["id"]]["notices"][0])
+
+    def test_refusals(self):
+        long = "x" * 2001
+        cases = [("13", '<move process="23" to="12"/>', "cannot be sent"),
+                 ("13", '<move process="10" to="11" stay="yes"/>', "not on a seam"),
+                 ("13", '<move process="03" to="03" stay="yes">words</move>', "carries no message"),
+                 ("13", '<move process="10" to="10"/>', "already there"),
+                 ("13", '<move process="zz" to="10"/>', "write it as"),
+                 ("13", '<move process="10" to="7f"/>', "not a position"),
+                 ("13", '<move process="10" to="12">words</move>', "only go to a big process"),
+                 ("13", '<move process="10" to="13">words</move>', "needs no carrier"),
+                 ("13", f'<move process="10" to="23">{long}</move>', "the most is 2000"),
+                 ("10", '<move process="11" to="12"/>', "only a big process")]
+        for n, (cell, text, why) in enumerate(cases):
+            _, meta, at = self.build(f"no{n}")
+            bank = registers.bank_for(meta)
+            snap, res = self.tick(meta, bank, 1, **{f"cell_{cell}": text})
+            self.assertEqual(bank.muons, [], text)
+            self.assertEqual(snap["events"][0]["kind"], "muon_refused", text)
+            self.assertIn(why, res[at[cell]["id"]]["notices"][0], text)
+
+    def test_either_attribute_order_works_and_a_plain_swap_is_not_a_command(self):
+        _, meta, at = self.build("order")
+        bank = registers.bank_for(meta)
+        self.tick(meta, bank, 1, cell_13='<move to="12" process="10"/><move to="23"/>')
+        self.assertEqual([(m["g"], m["to"]) for m in bank.muons], [(at["10"]["id"], "12")])
+
+    def test_a_move_ends_a_trial_and_a_watch_on_that_gluon(self):
+        _, meta, at = self.build("trial")
+        bank = registers.bank_for(meta)
+        self.tick(meta, bank, 1, cell_13='<program to="10">copy p0 to q1</program>')
+        self.assertEqual(len(bank.trials), 1)
+        bank.watches.append({"target": at["10"]["id"], "t0": 1, "new": "x", "old": "y", "by": at["13"]["id"], "before": {}})
+        self.tick(meta, bank, 2, cell_13='<move process="10" to="11"/>')
+        self.assertEqual((bank.trials, bank.watches), ({}, []))
+        self.tick(meta, bank, 3)
+        snap, _ = self.tick(meta, bank, 14)
+        self.assertEqual([e for e in snap["events"] if e["kind"].startswith("program")], [])
+
+    def test_where_is_on_demand_and_says_what_is_on_each_port(self):
+        _, meta, at = self.build("where")
+        bank = registers.bank_for(meta)
+        big = at["13"]
+        self.assertNotIn("where you are", registers.tick_block(meta, bank, big["id"], 1))
+        self.tick(meta, bank, 1, cell_13='<where/><move process="10" to="11"/>', cell_10="<where/>")
+        block = registers.tick_block(meta, bank, big["id"], 2)
+        self.assertIn("where you are: address 13, array 0, on a seam.", block)
+        for k, l in enumerate(big["links"]):
+            if l:
+                self.assertIn(f"p{k}/q{k}: {registers.address(meta['agents'][l['agent']])}, ", block)
+        self.assertIn("across the seam", block)
+        self.assertIn("10 moving to 11", block)
+        self.assertIn("00 free", block)
+        self.assertNotIn("04 free", block)                                   # the other array
+        self.assertNotIn("where you are", "\n".join(bank.news[at["10"]["id"]]))   # gluons have no map
+        self.tick(meta, bank, 2)
+        self.assertNotIn("where you are", registers.tick_block(meta, bank, big["id"], 3))
+
+    def test_flag_off_changes_nothing(self):
+        _, meta, at = self.build("off", gluon_moves=False)
+        bank = registers.bank_for(meta)
+        snap, res = self.tick(meta, bank, 1, cell_13='<where/><move process="10" to="12"/>')
+        self.assertEqual((bank.muons, snap["events"], res[at["13"]["id"]]["notices"]), ([], [], []))
+        self.assertEqual(bank.news[at["13"]["id"]], [])
+        self.assertNotIn("<where/>", registers.rules_text(meta["config"]))
+        self.assertIn("<where/>", registers.rules_text(self.build("on")[1]["config"]))
+
+    def test_resume_in_flight_matches_a_straight_run(self):
+        def go(rid, stops):
+            path, meta, at = self.build(rid)
+            by = at["13"]["id"]
+            meta["config"]["regfake"]["script"] = {f"{by}:2": '<move process="10" to="14">the prose</move><move process="04" to="04" stay="yes"/>',
+                                                   f"{by}:4": "<where/>"}
+            states, start = sim.restore_states(meta, []), 1
+            for end in stops:
+                asyncio.run(sim.run(path, meta, states, start, end))
+                keep = meta["config"]["regfake"]["script"]
+                roles = [(a.get("pool"), a.get("role")) for a in meta["agents"]]
+                meta, ticks = sim.load_run(path)
+                meta["config"]["regfake"]["script"] = keep
+                for a, (p, r) in zip(meta["agents"], roles):
+                    a["pool"], a["role"] = p, r
+                states = sim.restore_states(meta, ticks)
+                start = ticks[-1]["t"] + 1
+            return ticks
+        straight, resumed = go("mstr", [20]), go("mres", [5, 7, 20])
+        for a, b in zip(straight, resumed):
+            self.assertEqual(a["reg"], b["reg"])
+            self.assertEqual([x["prompt"] for x in a["agents"]], [x["prompt"] for x in b["agents"]])
+        done = [e for r in straight for e in r["reg"]["events"] if e["kind"] == "muon_done"]
+        self.assertEqual(sorted(e["prose"] for e in done), ["", "the prose"])
+        self.assertTrue(any(e.get("seam") for r in straight for e in r["reg"]["events"]))
+        self.assertTrue(any("the prose" in x["prompt"] for r in straight for x in r["agents"]))
+
+
 class GluonCheck(Base):
     def test_a_good_gluon_passes_every_case_and_a_garbler_none(self):
         import reg_gluon_check

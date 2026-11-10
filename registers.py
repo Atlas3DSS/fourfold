@@ -34,6 +34,27 @@ it reverts, against the window before it. one trial at a time per array.
   several hops right before anything arrives, and no single hop could raise delivery alone.
   noise: the share of node outputs that changed to something carrying no piece of the value. a change that raises it by more
   than noise_limit reverts whatever else it did, so a route cannot be bought by decohering the array.
+commanded moves (gluon_moves): a gluon never moves by itself and never votes. any big node writes <move process="ab" to="cd">prose</move>,
+naming any gluon and any node, anywhere in the network. the prose is optional. a muon is the only way prose moves between nodes;
+everything else on the wire is hex. from then on the gluon is a muon, a mail carrier:
+  it drops its instruction and walks one hop a tick, swapping with whoever holds the next cell. no vote can stop it. it goes around big
+  nodes if it can and through them if it must. a displaced node keeps its instruction, like any swap.
+  only its destination may write to it: to send it on, to change its prose, or to give it an instruction.
+  when two muons would each get closer by trading places they swap exact states, which is the same thing as trading cells, and neither
+  counts it as a hop. a muon that finds another muon that already went this tick sidesteps rather than stops.
+  seams: a muon never hops across a seam. it waits at the seam until a muon stands on the far side of that link, and they swap exact
+  states, which leaves each on the other's side with nothing left behind. a muon crossing the other way will do, and so will one told to
+  stand there: <move process="ab" to="cd" stay="yes"/>, for cd on a seam, and ab may already be at cd. a stander is a gluon again after the
+  swap, on the side it crossed to, and only the node that told it to stand can release it.
+  to a gluon's cell: it ends on that cell and is a gluon again. to a big node: it stops next to it. the receiver is told, and gets the
+  prose the tick after unless it writes <wait process="ab"/>, one tick each, at most n ticks, n being the direct links from it to the
+  sender. then the prose is handed over regardless, exactly as written, and the muon is a gluon again where it stands. it stops inside the receiver's array, so
+  being next to a receiver across a seam does not count.
+muons_only: muons under the bridge (say_only). no registers, no board, no input/output task, no instructions. a gluon is host-only: no model
+runs, it carries nothing on the wire, and the host copies its prose exactly. a sender may name the destination by its random value, which
+stays true when addresses change.
+where: <where/> shows a big node its address, what is on each port and the gluons in its array, once, the next tick. it is on demand
+so that it does not cost every tick.
 gate "exact" is the strict comparison arm: kept only if whole-value deliveries rose.
 gate "unit", the default: the host tests a new instruction at once. it asks that gluon, on the side, with fresh random values on the
 sources the instruction names, and scores each destination with the same analog correlation. it is installed only if the mean clears
@@ -77,15 +98,27 @@ DEFAULTS = {
     "noise_limit": 0.25,     # the most a change may raise the share of outputs churning without the value
     "default_program": "keep everything as it is.",
     "show_wiring": False,    # scaffold: show seam nodes every port link in their array, and across the seam
+    "muons_only": False,     # muons under the bridge, with no board and no input/output task. implies gluon_moves
+    "gluon_moves": False,    # big nodes may send gluons across the network, with prose, and may ask <where/>
+    "prose_chars": 2000,     # the most prose one muon carries; longer is refused, never cut
 }
 SRC_WIDTH = {"public": "public_hex", "private": "private_hex", "input": "input_hex"}
 OPP = {"N": "S", "S": "N", "E": "W", "W": "E"}
 DELTA = {"N": (-1, 0), "S": (1, 0), "E": (0, 1), "W": (0, -1)}
 BANKS: dict[str, "Bank"] = {}
+INERT = "(a small process: no model runs)"   # the system prompt of a gluon's turn under muons_only; sim.py answers it without a model
 
 
 def on(cfg: dict) -> bool:
     return bool((cfg.get("registers") or {}).get("enabled"))
+
+
+def muons_only(cfg: dict) -> bool:
+    return on(cfg) and bool(cfg["registers"].get("muons_only"))
+
+
+def has_board(cfg: dict) -> bool:
+    return on(cfg) and not muons_only(cfg)
 
 
 def address(a: dict) -> str:
@@ -104,6 +137,14 @@ def validate(cfg: dict) -> None:
     rows, cols = cfg["rows"], cfg["cols"]
     if rows > 16 or cols > 16:
         sys.exit(f"config: a 2-hex-digit address holds at most 16x16, got {rows}x{cols}")
+    if (rc["muons_only"] or rc["gluon_moves"]) and cfg.get("topology") == "tesseract":
+        sys.exit("config: muons walk a 2-d grid or torus; they don't run on the tesseract's directed links yet")
+    if rc["muons_only"]:
+        if rc["programs"] or rc["moves"]:
+            sys.exit("config: registers.muons_only has no instructions and no voted swaps: programs and moves must be off")
+        if not any(p.get("role") == "gluon" for p in (cfg.get("llm") or {}).get("pools") or []):
+            sys.exit("config: registers.muons_only needs a pool with role = \"gluon\", or there is nothing to send")
+        return
     if _cell(rc["input_cell"], rows, cols, "input_cell") == _cell(rc["output_cell"], rows, cols, "output_cell"):
         sys.exit("config: registers.input_cell and output_cell must differ")
     if int(rc["input_hex"]) <= int(rc["public_hex"]):
@@ -212,6 +253,7 @@ class Bank:
     last_churn: dict[str, int] = field(default_factory=dict)  # node -> outputs that changed without the value, this tick
     pending: list[dict] = field(default_factory=list)    # gate "unit": instructions waiting for their test, this tick only
     watches: list[dict] = field(default_factory=list)    # gate "unit": installed instructions, noise checked after a window
+    muons: list[dict] = field(default_factory=list)      # gluons in transit: g, by, to, dest, t0, prose, arrived, waits, n
 
 
 def _new_bank(meta: dict) -> Bank:
@@ -240,6 +282,7 @@ def restore(meta: dict, ticks: list[dict]) -> Bank:
         bank.programs = list(last.get("programs", bank.programs))
         bank.trials = dict(last.get("trials", {}))
         bank.watches = list(last.get("watches", []))
+        bank.muons = [dict(m) for m in last.get("muons", [])]
         bank.seen = {k: list(v) for k, v in last.get("seen", {}).items()}
         bank.seen_k = last.get("k", -1)
         bank.prev = [[p, *a["outputs"]] for p, a in zip(last["pub"], ticks[-1]["agents"])]
@@ -282,8 +325,32 @@ def format_line(cfg: dict) -> str:
     return f"<reg>aa {'p' * int(rc['public_hex'])} {'s' * int(rc['private_hex'])}</reg>"
 
 
+def _muon_text(cfg: dict) -> str:
+    rc = cfg["registers"]
+    to = "cd" if not rc["muons_only"] else "e52ba3af"
+    out = ("\n\nyou can send any small process to any other process in the network, with a message in plain "
+           f"words if you like: <move process=\"ab\" to=\"{to}\">your message</move>, or <move process=\"ab\" to=\"{to}\"/> to "
+           "just put it there. name where it goes by that process's address or by its random value. this is the only way words "
+           f"move between processes. a message holds up to {int(rc['prose_chars'])} characters, can only go to a big process, and "
+           "arrives exactly as written. small processes move only when told to. the one you send moves one position a tick, trades "
+           "places with whoever is in the way, and no process can stop it. if one passes through you, your address changes and so "
+           "does who is on your ports. while it moves, only the process it is going to can write to it. to a small process, it "
+           "ends up at that position. to a big process, it stops next to it; that process is told, and gets the message the next "
+           "tick unless it writes <wait process=\"ab\"/>, which holds it one tick more, up to as many ticks as the sender is links away.")
+    if cfg.get("modules"):
+        out += ("\na moving process cannot step across a seam. it waits there until another moving process is on the far side of that "
+                "link, and then the two trade places. to put one there, write <move process=\"ab\" to=\"cd\" stay=\"yes\"/>, with cd on "
+                "a seam (ab may already be at cd). it stands at cd until a crossing or until you send it elsewhere.")
+    out += ("\n<where/> shows you, next tick, your address, what is on each of your ports, and the small processes you can send"
+            + (", and the seam links out of your array." if cfg.get("modules") else "."))
+    return out
+
+
 def rules_text(cfg: dict) -> str:
     rc = cfg["registers"]
+    if rc["muons_only"]:
+        return ("\n\nbesides the ports, a position in the network has an address, 2 hex digits, row then column. some positions hold "
+                "small processes, which do not think, write nothing on their ports and never act by themselves." + _muon_text(cfg))
     pub, priv, inp = int(rc["public_hex"]), int(rc["private_hex"]), int(rc["input_hex"])
     out = (
         "\n\nyou also have registers, separate from your ports.\n"
@@ -330,6 +397,8 @@ def rules_text(cfg: dict) -> str:
                    "the host tries each new instruction for a while, on values nobody has seen, and undoes it unless the values "
                    "get further without adding noise. only one instruction can be on trial in an array at a time. ")
                 + "not every process accepts instructions.")
+    if rc["gluon_moves"]:
+        out += _muon_text(cfg)
     if cfg.get("actions"):
         out += (
             "\n\nyou can also take three actions. write any of these tags in your reply. the results come back to you "
@@ -348,6 +417,8 @@ def rules_text(cfg: dict) -> str:
 def tick_block(meta: dict, bank: Bank, i: int, t: int) -> str:
     """the register part of agent i's tick prompt. public registers are listed row by row, by address."""
     rc = meta["config"]["registers"]
+    if rc["muons_only"]:                   # no board: only what the host has to say, and only when it does
+        return ("\nfrom the host:\n" + "\n".join(bank.news[i]) + "\n") if bank.news[i] else ""
     agents = meta["agents"]
     me = agents[i]
     addr = address(me)
@@ -450,6 +521,16 @@ def gluon_grammar(meta: dict, i: int, port_hex: int, program: str) -> dict:
 _REG = re.compile(r"<reg>(.*?)</reg>", re.S | re.I)
 _OUT = re.compile(r"<out>(.*?)</out>", re.S | re.I)
 _MOVE = re.compile(r"""<move\s+to\s*=\s*["']?([0-9a-fA-F]{2})["']?\s*/?>""", re.I)
+def without_prose(raw: str) -> str:
+    """a reply with its <move process> tags taken out, so that a tag quoted in a message is not an action of the sender's."""
+    return _COMMAND.sub("", raw or "")
+
+
+_COMMAND = re.compile(r"<move\s+([^<>]*\bprocess\b[^<>]*?)\s*(?:/>|>(.*?)</move>|>)", re.S | re.I)
+_STAY = re.compile(r"""\bstay\s*=\s*["']?yes\b""", re.I)
+_WAIT = re.compile(r"""<wait\s+process\s*=\s*["']?([0-9a-fA-F]{2})["']?\s*/?>""", re.I)
+_ATTR = re.compile(r"""\b(process|to)\s*=\s*["']?([0-9a-fA-F]+)(?![0-9a-zA-Z])""", re.I)
+_WHERE = re.compile(r"<where\s*/?>", re.I)
 _VOTE = re.compile(r"""<(yes|no)\s+from\s*=\s*["']?([0-9a-fA-F]{2})["']?\s*/?>""", re.I)
 _NOTES = re.compile(r"<(protocol|log)>.*?</\1>", re.S | re.I)
 _PROGRAM = re.compile(r"""<program\s+to\s*=\s*["']?([0-9a-fA-F]{2})["']?\s*>(.*?)</program>""", re.S | re.I)
@@ -758,10 +839,9 @@ def _settle_trials(meta, bank, t, events, news) -> None:
         del bank.trials[array]
 
 
-def _take_programs(meta, bank, t, raws, texts, events, results, port_hex) -> None:
+def _take_programs(meta, bank, t, raws, texts, at, events, results, port_hex) -> None:
     rc = meta["config"]["registers"]
     agents = meta["agents"]
-    at = {address(a): a["id"] for a in agents}
     w = int(rc["probation"])
     unit = rc["gate"] == "unit"
     for i, text in enumerate(texts):
@@ -782,6 +862,8 @@ def _take_programs(meta, bank, t, raws, texts, events, results, port_hex) -> Non
                 why = f"{addr} is not in your array."
             elif not is_gluon(agents[target]):
                 why = f"the process at {addr} does not accept instructions."
+            elif any(m["g"] == target and m["dest"] != i for m in bank.muons):
+                why = f"{addr} is moving, and only the process it is going to can write to it."
             elif why:
                 pass                           # the instruction itself is bad: check_program said why
             elif unit and any(s_.startswith("input") for s_, _ in _steps(new)) and addr != str(rc["input_cell"]).lower():
@@ -813,12 +895,27 @@ def apply_tick(meta: dict, bank: Bank, t: int, raws: list[str | None], outputs: 
     agents = meta["agents"]
     n = len(agents)
     addr = [address(a) for a in agents]
+    seen = {x: k for k, x in enumerate(addr)}   # addresses in anything a node wrote mean what the node saw, whatever moves this tick
     pub_n, priv_n, in_n = int(rc["public_hex"]), int(rc["private_hex"]), int(rc["input_hex"])
     results = [{"reg_ok": False, "led_first": False, "errors": [], "notices": []} for _ in range(n)]
     events: list[dict] = []
     news: list[list[str]] = [[] for _ in range(n)]
     texts = [action_text(r) if r else "" for r in raws]
+    commands: list[list] = [[] for _ in range(n)]
+    if rc["muons_only"] or rc["gluon_moves"]:                  # prose is the sender's words, not its actions: a tag quoted in it does nothing
+        commands = [_COMMAND.findall(x) for x in texts]
+        texts = [_COMMAND.sub("", x) for x in texts]
 
+    if rc["muons_only"]:
+        _step_muons(meta, bank, t, texts, seen, events, news, results)
+        _take_commands(meta, bank, t, commands, seen, events, results, news)
+        _answer_where(meta, bank, texts, news)
+        bank.news = news
+        for r in results:
+            r.update(reg_ok=True, led_first=True)
+        return ({"addr": [address(a) for a in agents], "pub": list(bank.pub), "priv": list(bank.priv), "out": bank.out, "k": -1,
+                 "delivered": 0, "events": events, "proposals": [], "cooldown": list(bank.cooldown), "news": news,
+                 "programs": list(bank.programs), "muons": [dict(m) for m in bank.muons]}, results)
     pub, priv = list(bank.pub), list(bank.priv)
     for i, raw in enumerate(raws):
         if raw is None:
@@ -860,12 +957,18 @@ def apply_tick(meta: dict, bank: Bank, t: int, raws: list[str | None], outputs: 
     moved: set[int] = set()
     if rc["moves"]:
         moved = _resolve_swaps(meta, bank, t, texts, addr, events, news)
+    if rc["gluon_moves"]:
+        moved |= _step_muons(meta, bank, t, texts, seen, events, news, results)
+        _take_commands(meta, bank, t, commands, seen, events, results, news)
+    if rc["moves"]:
         bank.proposals = _take_proposals(meta, bank, t, raws, texts, moved, results)
     if rc["programs"]:
         _settle_trials(meta, bank, t, events, news)
         _settle_watches(meta, bank, t, events, news)
         port_hex = int(meta["config"].get("port_bits", 128)) // 4
-        _take_programs(meta, bank, t, raws, texts, events, results, port_hex)
+        _take_programs(meta, bank, t, raws, texts, seen, events, results, port_hex)
+    if rc["gluon_moves"]:                  # last, so that it shows this tick's moves and the new instructions
+        _answer_where(meta, bank, texts, news)
     bank.news = news
     snapshot = {
         "addr": [address(a) for a in agents],
@@ -882,6 +985,7 @@ def apply_tick(meta: dict, bank: Bank, t: int, raws: list[str | None], outputs: 
         "programs": list(bank.programs),
         "trials": dict(bank.trials),
         "watches": list(bank.watches),
+        "muons": [dict(m) for m in bank.muons],
         "seen": {k: list(v) for k, v in bank.seen.items()},
         "signal": signal,
         "noise": round(noise, 4),
@@ -889,6 +993,270 @@ def apply_tick(meta: dict, bank: Bank, t: int, raws: list[str | None], outputs: 
         "churn": dict(bank.last_churn),
     }
     return snapshot, results
+
+
+def _hops(meta: dict, a: dict, b: dict) -> int:
+    dr, dc = abs(a["pos"][0] - b["pos"][0]), abs(a["pos"][1] - b["pos"][1])
+    if meta.get("topology") == "torus":
+        dr, dc = min(dr, meta["rows"] - dr), min(dc, meta["cols"] - dc)
+    return dr + dc
+
+
+def _clear_instruction(meta, bank, node: int) -> None:
+    """a gluon that sets off stops following its instruction, and any check on that instruction is over."""
+    bank.programs[node] = str(meta["config"]["registers"]["default_program"])
+    bank.watches = [w for w in bank.watches if w["target"] != node]
+    bank.trials = {k: v for k, v in bank.trials.items() if v["target"] != node}
+
+
+def _cells_next(meta: dict, cell: tuple[int, int]) -> list[tuple[int, int]]:
+    """the cells one direct link away."""
+    rows, cols, out = meta["rows"], meta["cols"], []
+    for dr, dc in DELTA.values():
+        r, c = cell[0] + dr, cell[1] + dc
+        if meta.get("topology") == "torus":
+            r, c = r % rows, c % cols
+        if 0 <= r < rows and 0 <= c < cols:
+            out.append((r, c))
+    return out
+
+
+def _distances(meta: dict, goals: set, walls: set) -> dict:
+    dist, frontier = {c: 0 for c in goals}, list(goals)
+    while frontier:
+        fresh = []
+        for cell in frontier:
+            for c in _cells_next(meta, cell):
+                if c not in dist and c not in walls:
+                    dist[c] = dist[cell] + 1
+                    fresh.append(c)
+        frontier = fresh
+    return dist
+
+
+def _stops(meta: dict, m: dict) -> set:
+    """where this muon stops: on the cell it was sent to, or next to the node it was sent to, inside that node's array."""
+    agents = meta["agents"]
+    if m["dest"] is None:
+        return {(int(m["to"][0], 16), int(m["to"][1], 16))}
+    d = agents[m["dest"]]
+    who = {tuple(a["pos"]): a for a in agents}
+    near = [c for c in _cells_next(meta, tuple(d["pos"])) if who[c].get("module", 0) == d.get("module", 0)]
+    return {c for c in near if is_gluon(who[c])} or set(near)
+
+
+def _muon_dist(meta: dict, m: dict, cell: tuple[int, int]) -> int:
+    return _distances(meta, _stops(meta, m), set())[cell]
+
+
+def _hand_over(meta, bank, m, events, news) -> None:
+    agents = meta["agents"]
+    here = address(agents[m["g"]])
+    sender = address(agents[m["by"]])
+    who = f"{agents[m['by']]['seed']} at {sender}"
+    if m["prose"]:
+        to = address(agents[m["dest"]])
+        news[m["dest"]].append(f"message from {who}, brought by {here}:\n{m['prose']}")
+        news[m["by"]].append(f"your message reached {to}.")
+    else:
+        news[m["by"]].append(f"the process you sent is now at {here}.")
+    events.append({"kind": "muon_done", "g": m["g"], "by": m["by"], "dest": m["dest"], "at": here, "prose": m["prose"], "waits": m["waits"]})
+    bank.muons.remove(m)
+
+
+def _swap_cells(meta, a: int, b: int, events, **extra) -> None:
+    agents = meta["agents"]
+    was, to = address(agents[a]), address(agents[b])
+    agents[a]["pos"], agents[b]["pos"] = agents[b]["pos"], agents[a]["pos"]
+    events.append({"kind": "swap", "a": a, "b": b, "from": was, "to": to, "muon": True, **extra})
+
+
+def _hop(meta, bank, m, acted, moved, events, news) -> None:
+    """one hop. no node can veto it. a seam needs a muon on the far side, and it won't walk into another muon."""
+    agents = meta["agents"]
+    g = m["g"]
+    cell = tuple(agents[g]["pos"])
+    stops = _stops(meta, m)
+    at = {tuple(a["pos"]): a["id"] for a in agents}
+    muons = {x["g"]: x for x in bank.muons}
+    mine = agents[g].get("module", 0)
+    big = {tuple(a["pos"]) for a in agents if not is_gluon(a)} - stops
+    dist = _distances(meta, stops, big)
+    if cell not in dist:                   # walled in by big nodes: through them, then
+        dist = _distances(meta, stops, set())
+    near = _cells_next(meta, cell)
+    best = [c for c in near if dist.get(c, 1 << 30) == dist[cell] - 1]
+    for c in best:                         # a meeting: swap exact states if it gets the pair closer, or if the other stands there for it
+        n = muons.get(at[c])
+        if not n or n["g"] in acted or n["arrived"] is not None:
+            continue
+        crossing = agents[at[c]].get("module", 0) != mine
+        stander = crossing and n["stand"] and _muon_dist(meta, n, c) == 0
+        if stander or _muon_dist(meta, m, c) + _muon_dist(meta, n, cell) < _muon_dist(meta, m, cell) + _muon_dist(meta, n, c):
+            _swap_cells(meta, g, n["g"], events, exchange=True, seam=crossing)
+            acted |= {g, n["g"]}
+            moved |= {g, n["g"]}
+            m["at_seam"] = None
+            if stander:
+                _hand_over(meta, bank, n, events, news)
+            return
+    inside = [c for c in near if agents[at[c]].get("module", 0) == mine]
+    if best and not any(c in inside for c in best):
+        far = f"{best[0][0]:x}{best[0][1]:x}"
+        if m.get("at_seam") != far:        # nothing to do but wait for a partner; say so once
+            m["at_seam"] = far
+            here = address(agents[g])
+            events.append({"kind": "muon_at_seam", "g": g, "at": here, "far": far})
+            news[m["by"]].append(f"the process you sent to {m['to']} is waiting at {here}, on a seam. it can cross when a moving process "
+                                 f"is at {far}. to put one there write <move process=\"ab\" to=\"{far}\" stay=\"yes\"/>.")
+        return
+    free = [c for c in inside if at[c] not in muons]
+    if not free:
+        events.append({"kind": "muon_boxed", "g": g, "at": address(agents[g])})
+        return
+    c = min(free, key=lambda x: (dist.get(x, 1 << 30), x))
+    other = at[c]
+    _swap_cells(meta, g, other, events)
+    acted.add(g)
+    moved |= {g, other}
+    if not is_gluon(agents[other]):
+        news[other].append(f"a moving process passed through you: your address is now {address(agents[other])}.")
+
+
+def _step_muons(meta, bank, t, texts, at, events, news, results) -> set[int]:
+    agents = meta["agents"]
+    moved: set[int] = set()
+    acted: set[int] = set()
+    held: set[int] = set()
+    for i, text in enumerate(texts):       # a receiver holding a muon back, up to n ticks
+        for raw_addr in _WAIT.findall(text):
+            g = at.get(raw_addr.lower())
+            m = next((x for x in bank.muons if x["g"] == g), None)
+            if m is None or m["dest"] != i or m["arrived"] is None:
+                results[i]["notices"].append(f"<wait> was ignored: {raw_addr.lower()} has not brought you anything.")
+            elif m["waits"] >= m["n"]:
+                results[i]["notices"].append(f"<wait> was ignored: {raw_addr.lower()} has waited {m['n']} ticks, the most it can.")
+            else:
+                m["waits"] += 1
+                held.add(g)
+    for m in list(bank.muons):             # handed over now: the receiver has had a tick to read that it came
+        if m["arrived"] is not None and m["arrived"] < t and m["g"] not in held:
+            _hand_over(meta, bank, m, events, news)
+    for m in list(bank.muons):
+        if m["arrived"] is None and m in bank.muons and m["g"] not in acted and _muon_dist(meta, m, tuple(agents[m["g"]]["pos"])) > 0:
+            _hop(meta, bank, m, acted, moved, events, news)
+    for m in list(bank.muons):
+        if m["arrived"] is None and not m["stand"] and _muon_dist(meta, m, tuple(agents[m["g"]]["pos"])) == 0:
+            if m["prose"]:
+                here, sender = address(agents[m["g"]]), address(agents[m["by"]])
+                m["arrived"], m["n"] = t, _hops(meta, agents[m["dest"]], agents[m["by"]])
+                news[m["dest"]].append(f"{here}, next to you, has a message of {len(m['prose'])} characters from {agents[m['by']]['seed']} at {sender}. you get it next "
+                                       f"tick. to hold it longer write <wait process=\"{here}\"/>, up to {m['n']} ticks in all.")
+            else:
+                _hand_over(meta, bank, m, events, news)
+    if moved:
+        _rewire_meta(meta)
+    return moved
+
+
+def _command_refused(meta, bank, i, g, to, prose, stay, at) -> str | None:
+    agents = meta["agents"]
+    target, there = at.get(g), at.get(to)
+    if is_gluon(agents[i]):
+        return "only a big process can send another."
+    if target is None or there is None:
+        return f"{g if target is None else to} is not a position, or the random value of a process."
+    if not is_gluon(agents[target]):
+        return f"the process at {g} cannot be sent."
+    moving = next((m for m in bank.muons if m["g"] == target), None)
+    if moving and moving["dest"] != i and not (moving["stand"] and moving["by"] == i):
+        return f"{g} is moving, and only the process it is going to can write to it."
+    carrying = prose or (moving and moving["prose"])
+    if stay:
+        if carrying:
+            return "a process told to stay carries no message."
+        if not on_seam(agents[there]):
+            return f"{to} is not on a seam."
+    elif target == there:
+        return f"{g} is already there."
+    if carrying and is_gluon(agents[there]):
+        return "a message can only go to a big process."
+    if prose and there == i and not moving:
+        return "a message to yourself needs no carrier."
+    limit = int(meta["config"]["registers"]["prose_chars"])
+    if len(prose) > limit:
+        return f"the message is {len(prose)} characters and the most is {limit}. nothing was sent."
+    return None
+
+
+def _take_commands(meta, bank, t, commands, at, events, results, news) -> None:
+    agents = meta["agents"]
+    addr_of = {k: x for x, k in at.items()}
+    by_value = {a["seed"].lower(): addr_of[a["id"]] for a in agents}
+    for i, found in enumerate(commands):
+        note = results[i]["notices"]
+        if len(found) > 4:
+            note.append(f"only your first 4 <move process> tags were read; {len(found) - 4} were ignored.")
+        for attrs_text, body in found[:4]:
+            attrs = {k.lower(): v.lower() for k, v in _ATTR.findall(attrs_text)}
+            g, to = attrs.get("process"), attrs.get("to")
+            to = by_value.get(to, to)          # the destination's random value stands for wherever it is now
+            prose = body.strip()
+            stay = bool(_STAY.search(attrs_text))
+            why = _command_refused(meta, bank, i, g, to, prose, stay, at) if g and to else "write it as <move process=\"ab\" to=\"cd\"/>."
+            if why:
+                note.append(f"<move process> was ignored: {why}")
+                events.append({"kind": "muon_refused", "by": i, "process": g, "to": to, "why": why})
+                continue
+            target, there = at[g], at[to]
+            fields = {"by": i, "to": to, "dest": None if is_gluon(agents[there]) else there, "arrived": None, "waits": 0, "n": 0, "stand": stay}
+            m = next((x for x in bank.muons if x["g"] == target), None)
+            if m:                          # its destination writing to it: send it on, keeping the prose unless given new
+                m.update(fields, prose=prose or m["prose"])
+            else:
+                _clear_instruction(meta, bank, target)
+                bank.muons.append({"g": target, "t0": t, "prose": prose, **fields})
+            events.append({"kind": "muon", "by": i, "g": target, "from": g, "to": to, "prose": prose, "t": t})
+            news[i].append(f"{g} is on its way to {to}.")
+
+
+def _answer_where(meta, bank, texts, news) -> None:
+    for i, text in enumerate(texts):
+        if _WHERE.search(text) and not is_gluon(meta["agents"][i]):
+            news[i].append(where_map(meta, bank, i))
+
+
+def where_map(meta: dict, bank: Bank, i: int) -> str:
+    """the on-demand answer to where am i: this node's address, what is on each port, and the gluons in its array."""
+    agents = meta["agents"]
+    me = agents[i]
+    size = lambda a: "small" if is_gluon(a) else "big"
+    lines = [f"where you are: address {address(me)}, array {me.get('module', 0)}, {'on' if on_seam(me) else 'not on'} a seam.",
+             "on your ports (pK reads from it, qK writes to it):"]
+    for k, l in enumerate(me["links"]):
+        b = agents[l["agent"]] if l else None
+        lines.append(f"p{k}/q{k}: " + (f"{address(b)}, {size(b)}, value {b['seed']}, reached at its port {l['port']}"
+                                       + (", across the seam" if l.get("seam") else "") if b else "nothing"))
+    moving = {m["g"]: m for m in bank.muons}
+    small = []
+    for a in agents:
+        if is_gluon(a) and a.get("module", 0) == me.get("module", 0):
+            m = moving.get(a["id"])
+            state = ("free" if not m else f"waiting to hand over to {m['to']}" if m["arrived"] is not None
+                     else f"standing at {m['to']}" if m["stand"] and _muon_dist(meta, m, tuple(a["pos"])) == 0
+                     else f"waiting to cross to {m['at_seam']}" if m.get("at_seam") else f"moving to {m['to']}")
+            small.append(f"{address(a)} {state}")
+    lines.append(("small processes in your array: " if meta["config"].get("modules") else "small processes: ") + ("; ".join(small) if small else "none"))
+    seams = []
+    for a in agents:
+        if a.get("module", 0) == me.get("module", 0):
+            for l in a["links"]:
+                if l and l.get("seam"):
+                    b = agents[l["agent"]]
+                    seams.append(f"{address(a)}>{address(b)} {'moving' if b['id'] in moving else size(b)}")
+    if seams:
+        lines.append("seam links out of your array, near>far and what is at the far end: " + "; ".join(seams))
+    return "\n".join(lines)
 
 
 def _resolve_swaps(meta, bank, t, texts, addr, events, news) -> set[int]:
@@ -1038,6 +1406,8 @@ class FakeRegisterAgent:
         from sim import Reply   # imported here: sim imports this module at startup
         st, t, p = turn.state, turn.t, turn.prompt
         rng = random.Random(f"{st.seed}:{t}")
+        if "your private register:" not in p and not turn.system.startswith("you pass values"):   # under the bridge: only what the script says
+            return Reply(raw="<log>fake</log>\n" + self.script.get(f"{st.id}:{t}", ""))
         if rng.random() < self.malformed_rate:
             return Reply(raw="hmm. i am not sure what any of this means.")
         if turn.system.startswith("you pass values along"):
@@ -1089,7 +1459,8 @@ def summary(path: Path) -> dict:
     rc = meta["config"]["registers"]
     period, last = max(1, int(rc["input_period"])), ticks[-1] if ticks else None
     delivered = [e for r in ticks for e in r["reg"]["events"] if e["kind"] == "delivered"]
-    swaps = [e for r in ticks for e in r["reg"]["events"] if e["kind"] == "swap"]
+    swaps = [e for r in ticks for e in r["reg"]["events"] if e["kind"] == "swap" and not e.get("muon")]
+    hops = [e for r in ticks for e in r["reg"]["events"] if e["kind"] == "swap" and e.get("muon")]
     count = lambda kind: sum(e["kind"] == kind for r in ticks for e in r["reg"]["events"])
     refused = [e for r in ticks for e in r["reg"]["events"] if e["kind"] == "swap_refused"]
     pools = {i: a.get("pool", "") for i, a in enumerate(meta["agents"])}
@@ -1116,6 +1487,7 @@ def summary(path: Path) -> dict:
         "chance_per_write": f"1 in {16 ** int(rc['input_hex'])}",
         "median_latency": lat[len(lat) // 2] if lat else None,
         "swaps": len(swaps),
+        "muons": {"sent": count("muon"), "hops": len(hops), "done": count("muon_done"), "refused": count("muon_refused")},
         "swaps_refused": len(refused),
         "programs": {k: count(f"program_{k}") for k in ("trial", "kept", "failed_test", "reverted", "refused")},
         "led_line": stats,

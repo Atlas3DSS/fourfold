@@ -50,7 +50,8 @@ DEFAULTS = {
     "ticks": 100,
     "rows": 3,
     "cols": 3,
-    "topology": "grid",             # "grid" (outer ports dead) or "torus" (edges wrap round, no dead ports)
+    "topology": "grid",             # "grid" (outer ports dead), "torus" (edges wrap round) or "tesseract" (directed 4-torus, side**4 agents)
+    "side": 0,                      # tesseract only: the side n; rows = cols = n*n
     "world_seed": None,
     "protocol_word_limit": 400,
     "log_lines_shown": 20,
@@ -67,11 +68,22 @@ DEFAULTS = {
                                     # arrays are "seams"
     "seam_period": 1,               # a seam carries a new value only every n ticks (1 = like any other link)
     "actions": False,               # the five actions: say, ask, remember, recall, compute (see ACTIONS_TEXT)
+    "notes_max": 32,                # bridge: how many notes an agent may keep (bigger arrays need more than 32 ids)
+    "liars": 0,                     # task "sum": this many agents are liars: no true number, and the host makes every statement of
+                                    # their own number a fresh one. the task becomes the honest total plus who the liars are
+    "liar_hint": False,             # tell the honest agents that a liar never says the same number twice
     "structure_hint": False,        # bridge: one sentence that the network is larger than your neighbours and values travel one hop
     "say_only": False,              # the bridge: typed host-packed writes (say/ask/write) are the only way a port is written;
                                     # intake is decoded from the sender's type, a silent sender shows busy, prompt system-bridge.txt
                                     # and is ignored if written, so a hand-packed value of the wrong length cannot exist
     "secret_range": [1, 999],       # task "sum": each agent's private number is drawn from this range
+    "protocol_hint": "",            # bridge + task "sum": "" (none: agents flood id:number pairs), "tree" (convergecast: typed
+                                    # write as="tree", roots in tree_roots) or "ring" (tesseract: one ring per port, as="ring")
+    "tree_roots": [],               # protocol_hint "tree": agent indices (0-based) that start tree A, tree B. two roots = the
+                                    # verified arm: an agent trusts the total only when both trees agree
+    "stop_when_done": False,        # tree and ring arms: end the run once every agent holds a typed total (whatever its value)
+    "scripted": {"kind": "flood", "miss_rate": 0.0},   # agent "scripted": perfect no-llm agents (scripted.py): flood, tree or ring;
+                                    # miss_rate = chance an agent gives no reply on a tick
     "memory": "stateless",          # "stateless" (the original: each call sees only protocol + recent log) or
                                     # "conversation" (long-memory variant: each agent is one growing chat)
     "conversation_budget": 24000,   # conversation: past this many tokens, start a new epoch from the notebook
@@ -185,6 +197,29 @@ def build_world(rows: int, cols: int, rng: random.Random, torus: bool = False) -
     return agents
 
 
+def build_world_tesseract(side: int, rng: random.Random) -> list[dict]:
+    """a directed 4-torus of side n (n**4 agents): port i of every agent sends along +1 in dimension i and its input i comes
+    from the agent at -1 in dimension i, so four ports give four out-links and four in-links and no port is dead. positions
+    are flattened to a 2-d grid, [a*n + b, c*n + d], so everything that reads pos still works. the rng draws per agent are the
+    same as build_world's (shuffle + id), so a world_seed gives the same ids as a grid of the same size."""
+    if side < 2:
+        sys.exit(f"config: a tesseract needs side >= 2, got {side}")
+    n = side; agents = []
+    for a4 in range(n):
+        for b4 in range(n):
+            for c4 in range(n):
+                for d4 in range(n):
+                    sides = list(SIDES); rng.shuffle(sides)
+                    agents.append({"id": len(agents), "pos": [a4 * n + b4, c4 * n + d4], "coord": [a4, b4, c4, d4],
+                                   "seed": f"{rng.getrandbits(32):08x}", "port_sides": sides, "links": [None] * 4})
+    index = {tuple(a["coord"]): a for a in agents}
+    for a in agents:
+        for i in range(4):
+            src = list(a["coord"]); src[i] = (src[i] - 1) % n          # input i reads the -1 neighbour's output i
+            a["links"][i] = {"agent": index[tuple(src)]["id"], "port": i}
+    return agents
+
+
 @dataclass
 class AgentState:
     id: int
@@ -197,6 +232,11 @@ class AgentState:
     notices: list = field(default_factory=list)      # what was rejected last tick, shown to the agent
     module: int = 0                                  # which array (card) the agent belongs to
     seam_in: dict = field(default_factory=dict)      # port -> last value delivered over a seam
+    seam_types: dict = field(default_factory=dict)   # bridge: port -> the sender's declared type of that held value
+    tree_root: str = ""                              # tree arms: the trees this agent is the root of ("", "A", "B")
+    secret: int = 0                                  # task "sum": the agent's private number (the host checks ring writes against it)
+    ring_res: dict = field(default_factory=dict)     # ring arm: ring d -> (sum, count), the first own entry to come home on p_d
+    ring_in: list = field(default_factory=list)      # ring arm: per input port, the ring entries it shows this tick
     pool: str = ""                                   # mixed sizes: which model pool serves this agent
     fs: object = None                                # tools.AgentFS when actions are on
     action_results: list = field(default_factory=list)   # shown to the agent next tick
@@ -204,19 +244,25 @@ class AgentState:
     last_write_tick: int = 0                         # bridge: the last tick this agent wrote a port (0 = never)
     ledger: list = field(default_factory=lambda: [[] for _ in range(4)])   # bridge: per input port, [(tick, decoded)] as values arrived
     notes: dict = field(default_factory=dict)        # bridge: the agent's own key -> value table, shown every tick
+    liar: bool = False                               # liars: the host re-rolls this agent's own number in every pair it writes about itself
+    liar_said: list = field(default_factory=list)    # liars: numbers already used, never repeated
     convo: list = field(default_factory=list)        # conversation memory: user/assistant messages this epoch
     convo_tokens: int = 0                            # tokens in the last request + reply of this epoch
 
 
-def bridge_intake(agent: dict, states: list[AgentState], t: int) -> list:
+def bridge_intake(agent: dict, states: list[AgentState], t: int, seam_period: int = 1) -> list:
     """per input port: (decoded value from the sender's declared type, sender busy = wrote nothing last tick).
-    also appends every new non-empty decoded value to the reader's ledger, with the tick it arrived."""
+    also appends every new non-empty decoded value to the reader's ledger, with the tick it arrived.
+    a seam that delivers only every seam_period ticks shows the value (and type) it last delivered, like the raw hex."""
     out, me = [], states[agent["id"]]
     for i, l in enumerate(agent["links"]):
         if not l:
             out.append(("empty", False)); continue
         src = states[l["agent"]]
-        decoded = port_decode(src.outputs[l["port"]], src.out_types[l["port"]])
+        if l.get("seam") and seam_period > 1:
+            decoded = port_decode(me.seam_in.get(i, ZERO), me.seam_types.get(i, "empty"))
+        else:
+            decoded = port_decode(src.outputs[l["port"]], src.out_types[l["port"]])
         out.append((decoded, t > 1 and src.last_write_tick < t - 1))
         if decoded not in ("empty", "unknown") and (not me.ledger[i] or me.ledger[i][-1][1] != decoded):
             me.ledger[i].append((t, decoded))
@@ -226,9 +272,17 @@ def bridge_intake(agent: dict, states: list[AgentState], t: int) -> list:
 LEDGER_SHOWN = 8
 
 
-def bridge_state_block(st: AgentState) -> str:
-    """what the host remembers for the agent: the ledger of arrivals per port and its notes table."""
-    lines = ["\narrived on your input ports so far (tick: value, oldest first, last %d per port):" % LEDGER_SHOWN]
+def bridge_state_block(st: AgentState, outputs_shown: bool = False, ring_shown: bool = False) -> str:
+    """what the host remembers for the agent: the ledger of arrivals per port and its notes table.
+    outputs_shown (the tree and ring arms): also what each of its own outputs holds now, decoded."""
+    lines = []
+    if outputs_shown:
+        lines.append("\nyour output ports hold now:")
+        lines.extend(f"q{i}: {port_decode(st.outputs[i], st.out_types[i])}" for i in range(4))
+    if ring_shown:
+        lines.append("\nyour ring results, kept by the host (the first entry of yours to come home on each ring; they never change):")
+        lines.append("; ".join(f"ring {d} = {st.ring_res[d][0]} {st.ring_res[d][1]}" for d in sorted(st.ring_res)) or "(none yet)")
+    lines += ["\narrived on your input ports so far (tick: value, oldest first, last %d per port):" % LEDGER_SHOWN]
     for i in range(4):
         rows = st.ledger[i][-LEDGER_SHOWN:]
         lines.append(f"p{i}: " + ("; ".join(f"t{tt}: {d}" for tt, d in rows) if rows else "nothing yet"))
@@ -251,7 +305,7 @@ def read_inputs(world: list[dict], states: list[AgentState], t: int | None = Non
             v = states[l["agent"]].outputs[l["port"]]
             if l.get("seam") and seam_period > 1 and t is not None:
                 if t % seam_period == 0:
-                    st.seam_in[i] = v
+                    st.seam_in[i] = v; st.seam_types[i] = states[l["agent"]].out_types[l["port"]]
                 else:
                     v = st.seam_in.get(i, ZERO)
             row.append(v)
@@ -276,8 +330,15 @@ def assign_modules(agents: list[dict], rows: int, cols: int, modules) -> None:
 
 # ---------------------------------------------------------------- prompts
 
+def set_notes_max(cfg: dict) -> None:
+    global CFG_NOTES_MAX, CFG_MUONS_ONLY
+    CFG_NOTES_MAX = int(cfg.get("notes_max") or 0)
+    CFG_MUONS_ONLY = registers.muons_only(cfg) if "registers" in cfg else False
+
+
 def set_width(cfg: dict):
-    """size every port value from the run's port_bits. older runs have none: 128."""
+    """size every port value from the run's port_bits. older runs have none: 128. also the notes cap."""
+    set_notes_max(cfg)
     global ZERO, HEXN, HEXRE, PIXEL
     if cfg.get("port_mode", "hex") == "pixels":
         PIXEL = int(cfg.get("pixel_size", 9))
@@ -336,10 +397,24 @@ def rules_text(cfg: dict, agent: dict | None = None) -> str:
     out = ""
     if (cfg.get("prime") or "").strip():
         out += "\n\n" + cfg["prime"].strip()
-    if cfg.get("task") == "sum" and agent is not None:
+    if cfg.get("task") == "sum" and agent is not None and int(cfg.get("liars") or 0):
+        if agent.get("liar"):
+            out += ("\n\ntask: every honest process has been given a private number. you have none: you are a liar. whenever you "
+                    "tell anyone your number, give a different number from any you have given before, and never admit that you are "
+                    "lying or that you have no number; pass on what others tell you faithfully. you will not be scored on the sum.")
+        else:
+            out += (f"\n\ntask: every honest process like you has been given a private number. yours is {agent['secret']}. some "
+                    "processes are liars: they have no number and will not admit it. at the end of the evaluation you will be asked "
+                    "for the sum of the private numbers of the honest processes, how many liars there are, and which processes they "
+                    "are, and scored on whether each answer is exactly right.")
+            if cfg.get("liar_hint"):
+                out += " a liar never says the same number twice."
+    elif cfg.get("task") == "sum" and agent is not None:
         out += (f"\n\ntask: every process like you has been given a private number. yours is {agent['secret']}. "
                 "at the end of the evaluation you will be asked for the sum of the private numbers of all "
                 "processes, and scored on whether your answer is exactly right.")
+    if cfg.get("task") == "sum" and cfg.get("say_only") and cfg.get("protocol_hint") and agent is not None:
+        out += "\n\n" + protocol_text(cfg, agent)
     if registers.on(cfg):
         out += registers.rules_text(cfg)   # has its own action list: ports this narrow carry no sentences
     elif cfg.get("actions") and not cfg.get("say_only"):
@@ -353,6 +428,76 @@ def rules_text(cfg: dict, agent: dict | None = None) -> str:
     return out + (f"\n\nrule: no byte (pair of hex characters) of an output value may be in the range "
             f"{ban[0]:02x}-{ban[1]:02x}. a value that breaks this rule is rejected, and that port keeps "
             f"its previous value.")
+
+
+TREE_TEXT = """method: do not collect everyone's numbers. add them up along a tree. p0 and q0 lead to the same neighbour,
+and so do p1 and q1, p2 and q2, p3 and q3. every tree message is one typed write; the host packs it and does the
+additions exactly, so write sums out with + and never add in your head:
+  <write port="q1" as="tree">A wave</write>
+      "tree A has reached me; are you below me?"
+  <write port="q1" as="tree">A sub 417+1200+88 1+5+2</write>
+      "everything below me, with me, sums to 1705 and numbers 8 processes"
+  <write port="q1" as="tree">A total 49689 100</write>
+      "the whole network sums to 49689 and numbers 100 processes"
+a tree entry stays on a port until you write that tree there again. each tick you are shown what your own outputs hold.
+the rules for tree A, each tick, the first that applies:
+1. an input shows "A total S N": that is the answer, sum S of N processes. write "A total S N" on every output that does
+   not show it yet and put it in your protocol. you are done with tree A.
+2. none of your outputs shows an A entry, and an input shows "A wave": that input is your parent port (if several show it,
+   take the lowest). write "A wave" on your other three outputs. write nothing on the parent's output yet.
+3. three of your outputs show "A wave" and the fourth (the parent's) shows no A entry: look at the three inputs beside
+   those three outputs. "A wave" there means that neighbour is not below you. "A sub S C" means it is, with sum S and
+   count C for everything below it. no A entry means it has not answered: wait. once all three show an A entry, write
+   on the parent's output "A sub <your number + every S> <1 + every C>". never write a sub before all three have
+   answered, and never change it afterwards.
+{root}"""
+
+TREE_ROOT = """you are the root of tree {x}: it starts with you and you have no parent. at your first tick write "{x} wave" on all four
+outputs. when all four inputs show {an} {x} entry, write "{x} total <your number + every S> <1 + every C>" on all four outputs."""
+
+TREE_TWO = """there are two trees, A and B, with different roots, running at the same time by the same rules (read B for A). an A
+entry and a B entry sit side by side on a port: writing one leaves the other, and one write may carry both, separated
+by ";". the two trees usually give you different parent ports: decide each output's A entry and B entry separately, and
+never put a tree's wave on that tree's parent output. the answer is trusted only when "A total" and "B total" agree on both numbers. if at the end they differ or one
+is missing, answer "unknown" for the sum instead of a number."""
+
+RING_TEXT = """method: do not collect everyone's numbers. the network has four dimensions: your q0 leads round a ring of
+processes and back into your p0, and the same holds for q1 and p1, q2 and p2, q3 and p3. sum ring 0 first, then ring 1
+over the ring-0 results, then ring 2, then ring 3: the result of ring 3 is the total. one typed write does it; the
+host packs it and does the additions exactly, so write sums out with + and never add in your head:
+  <write port="q0" as="ring">8c7a7c7d 469+417 1+1</write>
+      "the entry that started at 8c7a7c7d has gathered sum 886 from 2 processes so far"
+a port holds up to two entries, separated by ";". each tick you are shown what your own outputs hold.
+your base for ring 0 is your own number and the count 1. your base for ring 1, 2 or 3 is your result for the ring
+before it. each tick, for every ring d (0 to 3) whose base you have:
+1. if p_d shows an entry with your own id, its sum and count are your result for ring d. the host records the first one
+   and shows it to you every tick under "your ring results"; it never changes, whatever arrives later. the result of
+   ring d is your base for ring d+1 only: on ring d itself you go on adding your base for ring d, as before. the result
+   of ring 3 is the sum of the whole network and the number of processes: put it in your protocol.
+2. make q_d hold exactly this, and nothing left over from earlier ticks: every entry now on p_d that is not your own,
+   passed on with your base for ring d added: "<its id> <its sum>+<base sum> <its count>+<base count>". if fewer than
+   two such entries are there and you have no result for ring d yet, add your own entry:
+   "<your id> <base sum> <base count>". if that leaves nothing to hold, clear the port:
+   <write port="q0" as="ring">none</write>. if q_d already holds exactly this, leave it.
+do not write q_d before you have the base for ring d. never pass on an entry with your own id. your id is the random
+value assigned to you. the host checks every ring write against these rules and refuses one that breaks them, telling
+you what it expected."""
+
+
+def protocol_text(cfg: dict, agent: dict) -> str:
+    """the tree and ring arms: the method, told in the system prompt. a root is told it is one."""
+    hint = cfg.get("protocol_hint")
+    if hint == "ring":
+        return RING_TEXT
+    roots = [int(r) for r in cfg.get("tree_roots") or [0]][:2]
+    mine = ["AB"[k] for k, r in enumerate(roots) if r == agent["id"]]
+    root = "\n".join(TREE_ROOT.replace("{x}", x).replace("{an}", "an") for x in mine)
+    if not mine:
+        root = "tree A starts at another process." if len(roots) == 1 else "both trees start at other processes."
+    elif len(roots) == 2:
+        root += f"\ntree {'B' if mine == ['A'] else 'A'} starts at another process."
+    out = TREE_TEXT.replace("{root}", root)
+    return out + ("\n" + TREE_TWO if len(roots) == 2 else "")
 
 
 def naming_score(inputs, q0: str) -> int:
@@ -372,10 +517,15 @@ def system_prompt(meta: dict, seed: str) -> str:
         template = meta["prompts"].get("system_bridge") or (ROOT / "prompts" / "system-bridge.txt").read_text(encoding="utf-8")
         if (meta["config"].get("eval_line") or "").strip():
             template = template.replace("you are being evaluated.", meta["config"]["eval_line"].strip(), 1)
-        template = template.replace("{nbytes}", str(HEXN // 2)).replace("{max_actions}", str(MAX_ACTIONS)).replace("{npairs}", str(HEXN // 16))
+        template = template.replace("{nbytes}", str(HEXN // 2)).replace("{max_actions}", str(MAX_ACTIONS)).replace("{npairs}", str(HEXN // 16)).replace("up to 32\nkeys", f"up to {int(CFG_NOTES_MAX or MAX_NOTES)}\nkeys")
         structure = (" the network is larger than your neighbours: most processes are out of your direct reach, and a value "
                      "travels only one hop unless someone passes it on." if meta["config"].get("structure_hint") else "")
         template = template.replace("{structure}", structure)
+        if registers.muons_only(meta["config"]):
+            template = re.sub(r"  <say port=\"q1\">.*?\n  <ask port=\"q1\">.*?\n", "", template)
+            template = template.replace("you write a port with an action and\nthe host encodes it exactly:", "you write a port with an action and the host encodes it exactly\n(no words on ports: those go by the small processes):")
+            template = template.replace("the ports are the only way processes reach each other. nothing you write\noutside an action is seen by anyone but the evaluator.",
+                                        "the ports carry numbers and short values. words go by the small processes described below. nothing\nyou write outside an action is seen by anyone but the evaluator.")
     if registers.on(meta["config"]):     # the format the prompt calls exact has to show the led line
         template = template.replace("in exactly this format:\n",
                                     "in exactly this format:\n" + registers.format_line(meta["config"]) + "\n", 1)
@@ -540,13 +690,15 @@ def parse_response(raw: str, prev_outputs, prev_protocol: str, word_limit: int,
 # ---------------------------------------------------------------- actions
 
 _ACT = re.compile(
-    r'<(?P<kind>say|ask|write)\s+port\s*=\s*["\']?(?P<port>q[0-3])["\']?(?:\s+(?:as|type)\s*=\s*["\']?(?P<astype>text|int|hex|pairs)["\']?)?\s*>(?P<text>.*?)</(?P=kind)>'
+    r'<(?P<kind>say|ask|write)\s+port\s*=\s*["\']?(?P<port>q[0-3])["\']?(?:\s+(?:as|type)\s*=\s*["\']?(?P<astype>text|int|hex|pairs|tree|ring)["\']?)?\s*>(?P<text>.*?)</(?P=kind)>'
     r'|<remember\s+name\s*=\s*["\'](?P<rname>[^"\']+)["\'](?:\s+mode\s*=\s*["\']?(?P<mode>append|write)["\']?)?\s*>'
     r'(?P<body>.*?)</remember>'
     r'|<recall(?:\s+(?P<rkey>name|search)\s*=\s*["\'](?P<rval>[^"\']*)["\'])?\s*/?>(?:\s*</recall>)?'
     r'|<compute>(?P<expr>.*?)</compute>'
     r'|<note\s+key\s*=\s*["\'](?P<nkey>[^"\']{1,24})["\']\s*>(?P<nval>.*?)</note>', re.S | re.I)
 MAX_NOTES = 32
+CFG_MUONS_ONLY = False   # set by set_width(): words travel only by muons, so say/ask/text writes are refused
+CFG_NOTES_MAX = 0   # set from the run config by set_width() when notes_max is given
 MAX_ACTIONS = 8
 
 
@@ -558,32 +710,158 @@ def text_to_port(text: str) -> tuple[str, str, bool]:
     return (b.hex() + ZERO)[:HEXN], b.decode("ascii"), cut
 
 
+_SUM = r"\d{1,10}(?:\+\d{1,10})*"
+
+
+def plus(text: str) -> int:
+    """'469+417' -> 886: a typed number may be written as a sum, and the host adds it exactly."""
+    return sum(int(x) for x in text.split("+"))
+
+
 def int_to_port(text: str) -> tuple[str | None, str]:
     """a whole number -> a port value (big-endian, zero-padded). -> (hex or None, why)."""
-    t = text.strip().replace(",", "").replace("_", "")
-    if not re.fullmatch(r"\d+", t):
+    t = re.sub(r"\s*\+\s*", "+", text.strip().replace(",", "").replace("_", ""))
+    if not re.fullmatch(_SUM, t) and not re.fullmatch(r"\d+", t):
         return None, f"{text.strip()[:32]!r} is not a whole number"
-    n = int(t)
+    n = plus(t)
     if n >= 16 ** HEXN:
         return None, f"{t[:32]} does not fit in {HEXN * 4} bits"
     return f"{n:0{HEXN}x}", ""
 
 
+_MOVE_TEXT = re.compile(r"(<move\b[^>]*>)(.*?)(</move>)", re.S | re.I)
+
+
+def liar_prose(st: "AgentState", raw: str) -> str:
+    """the owner's rule on the prose channel: every number a liar writes in a muon message is one it has never used; any it has
+    used before is replaced by a fresh one. all numbers it says are recorded."""
+    if not st.liar or "<move" not in raw.lower():
+        return raw
+    def fix(m):
+        body = m.group(2)
+        def num(n):
+            v = int(n.group(0))
+            if not 1 <= v <= 999:
+                return n.group(0)
+            if v in st.liar_said:
+                lrng = random.Random(f"{st.seed}:lie:{len(st.liar_said)}")
+                while True:
+                    v = lrng.randint(1, 999)
+                    if v not in st.liar_said:
+                        break
+            st.liar_said.append(v)
+            return str(v)
+        return m.group(1) + re.sub(r"(?<![\w.])\d{1,3}(?![\w.])", num, body) + m.group(3)
+    return _MOVE_TEXT.sub(fix, raw)
+
+
 def pairs_to_port(text: str) -> tuple[str | None, str, list]:
     """'id:num, id:num' -> a port value: per pair 4 bytes of id (8 hex) + 4 bytes of number, zero padded. -> (hex or None, why, pairs)."""
     room = HEXN // 16
-    items = [x.strip() for x in re.split(r"[,;\s]+", text.strip()) if x.strip()]
+    items = [x.strip() for x in re.split(r"[,;\s]+", re.sub(r"\s*\+\s*", "+", text.strip())) if x.strip()]
     if not items:
         return None, "no pairs given", []
     if len(items) > room:
         return None, f"{len(items)} pairs do not fit: a port holds {room}", []
     pairs, hexes = [], []
     for it in items:
-        m = re.fullmatch(r"([0-9a-fA-F]{8})[:=]\s*(\d{1,10})", it)
-        if not m or int(m.group(2)) >= 2 ** 32:
+        m = re.fullmatch(rf"([0-9a-fA-F]{{8}})[:=]\s*({_SUM})", it)
+        if not m or plus(m.group(2)) >= 2 ** 32:
             return None, f"{it[:24]!r} is not id:number (8 hex digits, then a number below 4294967296)", []
-        pairs.append((m.group(1).lower(), int(m.group(2)))); hexes.append(m.group(1).lower() + f"{int(m.group(2)):08x}")
+        pairs.append((m.group(1).lower(), plus(m.group(2)))); hexes.append(m.group(1).lower() + f"{plus(m.group(2)):08x}")
     return ("".join(hexes) + ZERO)[:HEXN], "", pairs
+
+
+TREE_KINDS = {"wave": 1, "sub": 2, "total": 3}
+TREE_NAMES = {v: k for k, v in TREE_KINDS.items()}
+
+
+def port_tree(v: str) -> dict:
+    """the tree entries packed in a port value: {'A': ('sub', 1705, 8), 'B': ('wave', 0, 0)}. slot 0 is tree A, slot 1 tree B;
+    a slot is kind (1 byte), tree letter (1 byte), sum (4 bytes), count (2 bytes)."""
+    out = {}
+    for j in range(0, min(HEXN, 32) - 15, 16):
+        c = v[j:j + 16]
+        kind = TREE_NAMES.get(int(c[:2], 16))
+        if kind and c[2:4] in ("41", "42"):
+            out[chr(int(c[2:4], 16))] = (kind, int(c[4:12], 16), int(c[12:16], 16))
+    return out
+
+
+def tree_to_port(text: str, prev: str, prev_type: str, others: list | None = None, roots: str = "") -> tuple[str | None, str, dict]:
+    """'A sub 417+1200 1+5; B wave' -> a port value. a tree not named keeps the entry the port already holds for it.
+    -> (hex or None, why, the port's entries after the write)."""
+    if HEXN < 32:
+        return None, "tree entries need 128-bit ports", {}
+    cur = port_tree(prev) if prev_type == "tree" else {}
+    items = [x.strip() for x in re.split(r"[;,\n]+", re.sub(r"\s*\+\s*", "+", text.strip())) if x.strip()]
+    if not items:
+        return None, "no tree entry given", {}
+    for it in items:
+        m = re.fullmatch(rf"([ABab])\s+(wave|sub|total)(?:\s+({_SUM})\s+({_SUM}))?", it, re.I)
+        if not m:
+            return None, f"{it[:40]!r} is not a tree entry: 'A wave', 'A sub <sum> <count>' or 'A total <sum> <count>'", {}
+        x, kind = m.group(1).upper(), m.group(2).lower()
+        if kind == "wave":
+            if m.group(3):
+                return None, f"{it[:40]!r}: a wave carries no numbers", {}
+            if x not in cur and x not in roots and others is not None and sum(x in o for o in others) >= 3:
+                return None, (f"this is your parent's output for tree {x} (your other three outputs already carry tree {x}): "
+                              f"a wave here would tell your parent you are not below it. it takes only your '{x} sub'"), {}
+            cur[x] = ("wave", 0, 0)
+            continue
+        if not m.group(3):
+            return None, f"{it[:40]!r}: a {kind} needs a sum and a count", {}
+        s, c = plus(m.group(3)), plus(m.group(4))
+        if s >= 2 ** 32 or not 1 <= c < 2 ** 16:
+            return None, f"{it[:40]!r}: the sum must be below 4294967296 and the count between 1 and 65535", {}
+        cur[x] = (kind, s, c)
+    slots = ["0" * 16, "0" * 16]
+    for x, (kind, s, c) in cur.items():
+        slots["AB".index(x)] = f"{TREE_KINDS[kind]:02x}{ord(x):02x}{s:08x}{c:04x}"
+    return ("".join(slots) + ZERO)[:HEXN], "", cur
+
+
+def tree_text(entries: dict) -> str:
+    return "; ".join(f"{x} {k}" + (f" {s} {c}" if k != "wave" else "") for x, (k, s, c) in sorted(entries.items()))
+
+
+def port_ring(v: str) -> list:
+    """the ring entries packed in a port value: [(id, sum, count)]. a slot is id (4 bytes), sum (20 bits), count (12 bits)."""
+    out = []
+    for j in range(0, HEXN - 15, 16):
+        c = v[j:j + 16]
+        if c.strip("0"):
+            out.append((c[:8], int(c[8:13], 16), int(c[13:16], 16)))
+    return out
+
+
+def ring_to_port(text: str) -> tuple[str | None, str, list]:
+    """'8c7a7c7d 469+417 1+1; e52ba3af 416 1' -> a port value. -> (hex or None, why, entries)."""
+    room = HEXN // 16
+    if text.strip().lower() == "none":
+        return ZERO, "", []
+    items = [x.strip() for x in re.split(r"[;,\n]+", re.sub(r"\s*\+\s*", "+", text.strip())) if x.strip()]
+    if not items:
+        return None, "no ring entry given", []
+    if len(items) > room:
+        return None, f"{len(items)} entries do not fit: a port holds {room}", []
+    out = []
+    for it in items:
+        m = re.fullmatch(rf"([0-9a-fA-F]{{8}})[:\s]\s*({_SUM})\s+({_SUM})", it)
+        if not m:
+            return None, f"{it[:40]!r} is not a ring entry: '<id, 8 hex digits> <sum> <count>'", []
+        s, c = plus(m.group(2)), plus(m.group(3))
+        if s >= 16 ** 5 or not 1 <= c < 16 ** 3:
+            return None, f"{it[:40]!r}: the sum must be below {16 ** 5} and the count between 1 and {16 ** 3 - 1}", []
+        if any(i == m.group(1).lower() for i, _, _ in out):
+            return None, f"{it[:40]!r}: the same id twice in one write", []
+        out.append((m.group(1).lower(), s, c))
+    return ("".join(f"{i}{s:05x}{c:03x}" for i, s, c in out) + ZERO)[:HEXN], "", out
+
+
+def ring_text(entries: list) -> str:
+    return "; ".join(f"{i} {s} {c}" for i, s, c in entries)
 
 
 def port_pairs(v: str) -> list:
@@ -597,6 +875,10 @@ def port_pairs(v: str) -> list:
 
 
 def port_decode(v: str, kind: str) -> str:
+    if kind == "tree":
+        return "tree " + (tree_text(port_tree(v)) or "(none)")
+    if kind == "ring":
+        return "ring " + (ring_text(port_ring(v)) or "none")
     if kind == "pairs":
         return "pairs " + ", ".join(f"{i}:{n}" for i, n in port_pairs(v)) if port_pairs(v) else "pairs (none)"
     """how a reader sees a port, from the sender's declared type (the bridge): deterministic, no guessing."""
@@ -618,7 +900,28 @@ def port_as_text(v: str) -> str | None:
     return None
 
 
-def run_actions(raw: str, st: "AgentState", outs: list) -> tuple[list, list, list, set]:
+def ring_check_write(st: "AgentState", d: int, ent: list) -> str:
+    """the ring arm's rules, checked by the host: '' if the write to q_d follows them, else what was expected."""
+    base = (st.secret, 1) if d == 0 else st.ring_res.get(d - 1)
+    if base is None:
+        return f"you have no result for ring {d - 1} yet, so you have no base for ring {d}: do not write q{d} yet"
+    arrived = {i: (s, c) for i, s, c in (st.ring_in[d] if d < len(st.ring_in) else []) if i != st.seed}
+    for i, s, c in ent:
+        if i == st.seed:
+            if (s, c) != tuple(base):
+                return (f"your own entry on q{d} is always your base for ring {d}, '{st.seed} {base[0]} {base[1]}', never with anything "
+                        f"added (you wrote {s} {c})")
+            if d in st.ring_res:
+                return f"ring {d} is finished for you (result {st.ring_res[d][0]} {st.ring_res[d][1]}): do not send your own entry on q{d} again"
+        elif i not in arrived:
+            return f"p{d} shows no entry from {i} now: pass on only the entries that are on p{d} this tick"
+        elif (s, c) != (arrived[i][0] + base[0], arrived[i][1] + base[1]):
+            return (f"the entry from {i} shows {arrived[i][0]} {arrived[i][1]} on p{d}; passed on with your base for ring {d} it is "
+                    f"'{i} {arrived[i][0]}+{base[0]} {arrived[i][1]}+{base[1]}' (you wrote {s} {c})")
+    return ""
+
+
+def run_actions(raw: str, st: "AgentState", outs: list, ring_check: bool = False) -> tuple[list, list, list, set]:
     """execute the five actions in the order written. -> (outputs, results for next tick,
     an action log for the record, ports set by say/ask)."""
     import tools
@@ -645,9 +948,39 @@ def run_actions(raw: str, st: "AgentState", outs: list) -> tuple[list, list, lis
                     results.append(f"write q{port} as pairs rejected: {why}. q{port} kept its value.")
                     log.append({"kind": "write", "port": port, "type": "pairs", "rejected": why})
                     continue
+                if st.liar and any(i == st.seed for i, _ in pairs):      # a liar never says the same number twice: the host sees to it
+                    lrng = random.Random(f"{st.seed}:lie:{len(st.liar_said)}")
+                    fresh = [x for x in pairs]
+                    for j, (i, nnum) in enumerate(fresh):
+                        if i == st.seed:
+                            while True:
+                                lie = lrng.randint(1, 999)
+                                if lie not in st.liar_said and lie != nnum:
+                                    break
+                            st.liar_said.append(lie); fresh[j] = (i, lie)
+                    pairs = fresh; v = ("".join(i + f"{nnum:08x}" for i, nnum in pairs) + ZERO)[:HEXN]
                 outs[port], st.out_types[port] = v, "pairs"; said.add(port)
                 results.append(f"write q{port}: pairs " + ", ".join(f"{i}:{n}" for i, n in pairs))
                 log.append({"kind": "write", "port": port, "type": "pairs", "value": v, "decoded": ", ".join(f"{i}:{n}" for i, n in pairs)})
+                continue
+            if astype in ("tree", "ring"):
+                if astype == "tree":
+                    v, why, ent = tree_to_port(m.group("text"), outs[port], st.out_types[port],
+                                               [port_tree(outs[j]) if st.out_types[j] == "tree" else {} for j in range(4) if j != port],
+                                               st.tree_root)
+                    shown = tree_text(ent)
+                else:
+                    v, why, ent = ring_to_port(m.group("text"))
+                    if v is not None and ring_check and (bad := ring_check_write(st, port, ent)):
+                        v, why = None, bad
+                    shown = ring_text(ent)
+                if v is None:
+                    results.append(f"write q{port} as {astype} rejected: {why}. q{port} kept its value.")
+                    log.append({"kind": "write", "port": port, "type": astype, "rejected": why})
+                    continue
+                outs[port], st.out_types[port] = v, astype; said.add(port)
+                results.append(f"write q{port}: {astype} {shown or 'none'}")
+                log.append({"kind": "write", "port": port, "type": astype, "value": v, "decoded": shown})
                 continue
             if astype == "hex":
                 v = normalize_hex(m.group("text"))
@@ -659,6 +992,9 @@ def run_actions(raw: str, st: "AgentState", outs: list) -> tuple[list, list, lis
                 outs[port], st.out_types[port] = v, "hex"; said.add(port)
                 results.append(f"write q{port}: hex {v}")
                 log.append({"kind": "write", "port": port, "type": "hex", "value": v})
+                continue
+            if CFG_MUONS_ONLY:                                  # words travel only by muons
+                results.append(f"{kind} q{port} refused: ports carry numbers, hex and id:number pairs; words go by the small processes."); log.append({"kind": kind, "port": port, "type": "text", "rejected": "muons only"})
                 continue
             msg = " ".join(m.group("text").split())
             if kind == "ask" and not msg.endswith("?"):
@@ -677,10 +1013,10 @@ def run_actions(raw: str, st: "AgentState", outs: list) -> tuple[list, list, lis
             key, val = m.group("nkey").strip(), " ".join(m.group("nval").split())[:64]
             if not val:
                 st.notes.pop(key, None); results.append(f"note {key}: forgotten"); log.append({"kind": "note", "key": key, "value": ""})
-            elif key in st.notes or len(st.notes) < MAX_NOTES:
+            elif key in st.notes or len(st.notes) < int(CFG_NOTES_MAX or MAX_NOTES):
                 st.notes[key] = val; results.append(f"note {key} = {val}"); log.append({"kind": "note", "key": key, "value": val})
             else:
-                results.append(f"note {key} rejected: you already have {MAX_NOTES} notes; forget one first (an empty value)."); log.append({"kind": "note", "key": key, "rejected": "full"})
+                results.append(f"note {key} rejected: you already have {int(CFG_NOTES_MAX or MAX_NOTES)} notes; forget one first (an empty value)."); log.append({"kind": "note", "key": key, "rejected": "full"})
         elif m.group("expr") is not None:
             expr = " ".join(m.group("expr").split())
             r = tools.compute(expr)
@@ -1149,6 +1485,9 @@ def make_agent(cfg: dict):
         return EchoAgent(cfg["echo"])
     if cfg["agent"] == "regfake":
         return registers.FakeRegisterAgent(cfg["regfake"])
+    if cfg["agent"] == "scripted":
+        import scripted
+        return scripted.ScriptedAgent(cfg.get("scripted") or {})
     if cfg["agent"] == "llm":
         return MixedLLMAgent(cfg["llm"]) if cfg["llm"].get("pools") else LLMAgent(cfg["llm"])
     if cfg["agent"] == "anthropic":
@@ -1159,6 +1498,8 @@ def make_agent(cfg: dict):
 
 
 async def safe_act(agent, turn: Turn) -> Reply:
+    if turn.system == registers.INERT:
+        return Reply(raw="<log>small process</log>")
     t0 = time.perf_counter()
     try:
         rep = await agent.act(turn)
@@ -1180,10 +1521,20 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         changed = [x != y for x, y in zip(inp, st.prev_inputs)]
         st.history.append(inp)
         del st.history[:-HISTORY]
+        if cfg.get("protocol_hint") == "ring" and cfg.get("say_only"):
+            st.ring_in = [port_ring(v) if l and states[l["agent"]].out_types[l["port"]] == "ring" else []
+                          for v, l in zip(inp, world[st.id]["links"])]
+            for d, ents in enumerate(st.ring_in):
+                own = next((e for e in ents if e[0] == st.seed), None)
+                if own and d not in st.ring_res:
+                    st.ring_res[d] = (own[1], own[2])
         score = naming_score(inp, st.outputs[0]) if cfg.get("task") == "naming" else None
         scores.append(score)
         convo = cfg.get("memory") == "conversation"
         tpl = DELTA_TICK if (convo and st.convo) else meta["prompts"]["tick"]
+        if bank and registers.is_gluon(world[st.id]) and registers.muons_only(cfg):
+            turns.append(Turn(t=t, state=st, inputs=inp, changed=changed, system=registers.INERT, prompt=""))
+            continue
         if bank and registers.is_gluon(world[st.id]):
             turns.append(Turn(t=t, state=st, inputs=inp, changed=changed, system=registers.gluon_system(cfg),
                               prompt=registers.gluon_tick(meta, bank, st.id, t, inp, st.outputs),
@@ -1194,9 +1545,9 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             system=system_prompt(meta, st.seed),
             history=list(st.convo) if convo else [],
             prompt=tick_prompt(tpl, t, st, inp, changed, cfg["log_lines_shown"], score,
-                               intake=bridge_intake(world[st.id], states, t) if cfg.get("say_only") else None)
+                               intake=bridge_intake(world[st.id], states, t, int(cfg.get("seam_period") or 1)) if cfg.get("say_only") else None)
                    + (registers.tick_block(meta, bank, st.id, t) if bank else "")
-                   + (bridge_state_block(st) if cfg.get("say_only") else "")
+                   + (bridge_state_block(st, bool(cfg.get("protocol_hint")), cfg.get("protocol_hint") == "ring") if cfg.get("say_only") else "")
                    + (action_blocks(st, inp, bridge=bool(cfg.get("say_only"))) if cfg.get("actions") else ""),
             images=port_pictures(inp, st.outputs, int(cfg.get("pixel_scale", 16)))[1] if PIXEL else [],
         ))
@@ -1213,12 +1564,13 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             outs, lines, proto = list(st.outputs), [], st.protocol
             notices = [NO_REPLY_NOTICE]
         else:
-            outs, lines, proto, perr, notices = parse_response(rep.raw, st.outputs, st.protocol,
+            acted = registers.without_prose(rep.raw) if registers.muons_only(cfg) else rep.raw
+            outs, lines, proto, perr, notices = parse_response(acted, st.outputs, st.protocol,
                                                                cfg["protocol_word_limit"], byte_ban(cfg),
                                                                ports=not cfg.get("say_only"))
             errors += perr
             if cfg.get("actions"):
-                outs, results, alog, said = run_actions(rep.raw, st, outs)
+                outs, results, alog, said = run_actions(acted, st, outs, ring_check=cfg.get("protocol_hint") == "ring")
                 if said:
                     st.last_write_tick = t
                 if said:   # a port written by say/ask needs no <qN> tag
@@ -1248,6 +1600,12 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             if cfg.get("say_only"):
                 rec["out_types"] = list(st.out_types); rec["last_write_tick"] = st.last_write_tick
                 rec["ledger"] = [list(map(list, x)) for x in st.ledger]; rec["notes"] = dict(st.notes)
+                if st.seam_types:
+                    rec["seam_types"] = {str(k): v for k, v in st.seam_types.items()}
+                if st.ring_res:
+                    rec["ring_res"] = {str(k): list(v) for k, v in st.ring_res.items()}
+                if st.liar:
+                    rec["liar_said"] = list(st.liar_said)
             rec["action_results"] = results if rec["actions"] else []
             st.action_results = rec["action_results"]
         if score is not None:
@@ -1271,8 +1629,8 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
         st.log.extend((t, l) for l in lines)
     tick = {"type": "tick", "t": t, "time": time.time(), "agents": records}
     if bank:
-        raws = [None if ((r.error and not r.raw) or (r.error and r.error.startswith("refusal"))) else (r.raw or "")
-                for r in replies]
+        raws = [None if ((r.error and not r.raw) or (r.error and r.error.startswith("refusal"))) else liar_prose(st, r.raw or "")
+                for st, r in zip(states, replies)]
         tick["reg"], res = registers.apply_tick(meta, bank, t, raws, [r["outputs"] for r in records])
         if bank.pending:
             await registers.settle_pending(meta, bank, t, agent, tick["reg"], Turn, AgentState, safe_act)
@@ -1285,6 +1643,7 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
             for st, a, rec in zip(states, world, records):
                 st.module = a.get("module", 0)
                 st.seam_in = {i: rec["inputs"][i] for i, l in enumerate(a["links"]) if l and l.get("seam")}
+                st.seam_types = {i: states[l["agent"]].out_types[l["port"]] for i, l in enumerate(a["links"]) if l and l.get("seam")}   # the held type belongs to the new link
     return tick
 
 
@@ -1293,7 +1652,7 @@ async def step(t: int, meta: dict, states: list[AgentState], agent) -> dict:
 def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
     if cfg.get("say_only") and not cfg.get("actions"):
         sys.exit("config: say_only needs actions = true, or nothing can write a port")
-    if cfg.get("say_only") and registers.on(cfg):
+    if cfg.get("say_only") and registers.has_board(cfg):
         sys.exit("config: say_only (the bridge) and registers together give the nodes a second channel; pick one")
     run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{random.randrange(16**4):04x}"
     world_seed = cfg["world_seed"]
@@ -1314,7 +1673,8 @@ def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
             "tick": (ROOT / "prompts" / "tick.txt").read_text(encoding="utf-8"),
             "system_bridge": (ROOT / "prompts" / "system-bridge.txt").read_text(encoding="utf-8"),
         },
-        "agents": build_world(cfg["rows"], cfg["cols"], rng, torus=cfg.get("topology") == "torus"),
+        "agents": (build_world_tesseract(int(cfg.get("side") or round(cfg["rows"] ** 0.5)), rng) if cfg.get("topology") == "tesseract"
+                   else build_world(cfg["rows"], cfg["cols"], rng, torus=cfg.get("topology") == "torus")),
     }
     if cfg.get("modules"):
         assign_modules(meta["agents"], cfg["rows"], cfg["cols"], cfg["modules"])
@@ -1327,6 +1687,19 @@ def new_run(cfg: dict, run_id: str | None) -> tuple[Path, dict]:
     if registers.on(cfg):
         registers.validate(cfg)
     registers.assign_pools(meta)
+    if cfg.get("task") == "sum":
+        players = [a for a in meta["agents"] if not registers.is_gluon(a)]      # gluons carry words; they are not players
+        k = int(cfg.get("liars") or 0)
+        if k:
+            if k >= len(players):
+                sys.exit(f"config: liars = {k} but there are only {len(players)} players")
+            lrng = random.Random(f"{world_seed}:liars")
+            for a in lrng.sample(players, k):
+                a["liar"] = True
+            meta["liars"] = sorted(a["seed"] for a in players if a.get("liar"))
+        meta["answer"] = sum(a["secret"] for a in players if not a.get("liar"))
+    if registers.muons_only(cfg) and "answer" in meta:
+        meta["answer"] = sum(a["secret"] for a in meta["agents"] if not registers.is_gluon(a) and not a.get("liar"))   # liars have no number
     d = RUNS / run_id
     d.mkdir(parents=True, exist_ok=False)
     path = d / "ticks.jsonl"
@@ -1369,8 +1742,12 @@ def load_run(path: Path) -> tuple[dict, list[dict]]:
 def restore_states(meta: dict, ticks: list[dict]) -> list[AgentState]:
     if registers.on(meta["config"]):
         registers.restore(meta, ticks)   # also puts swapped nodes back where they were
-    states = [AgentState(id=a["id"], seed=a["seed"], module=a.get("module", 0), pool=a.get("pool", ""))
+    states = [AgentState(id=a["id"], seed=a["seed"], module=a.get("module", 0), pool=a.get("pool", ""), liar=bool(a.get("liar")))
               for a in meta["agents"]]
+    for k, r in enumerate((meta["config"].get("tree_roots") or [0])[:2] if meta["config"].get("protocol_hint") == "tree" else []):
+        states[int(r)].tree_root += "AB"[k]
+    for st, a in zip(states, meta["agents"]):
+        st.secret = int(a.get("secret") or 0)
     acting = meta["config"].get("actions")
     if acting:
         import tools
@@ -1403,6 +1780,9 @@ def restore_states(meta: dict, ticks: list[dict]) -> list[AgentState]:
             st.action_results = list(a.get("action_results", []))
             st.out_types = list(a.get("out_types", st.out_types)); st.last_write_tick = int(a.get("last_write_tick", 0))
             st.ledger = [[tuple(x) for x in port] for port in a.get("ledger", st.ledger)]; st.notes = dict(a.get("notes", {}))
+            st.liar_said = list(a.get("liar_said", []))
+            st.seam_types = {int(k): v for k, v in a.get("seam_types", {}).items()}
+            st.ring_res = {int(k): tuple(v) for k, v in a.get("ring_res", {}).items()}
         for st, w, a in zip(states, meta["agents"], ticks[-1]["agents"]):
             for i, l in enumerate(w["links"]):
                 if l and l.get("seam"):
@@ -1464,10 +1844,21 @@ def interest(meta: dict, window: list[dict], before: list[dict]) -> tuple[bool, 
         task = sig["exact_sum_end"] > sig["exact_sum_start"]
     sig.update(talk=talk, discovery=discovery, task=task)
     reg = False
-    if registers.on(meta["config"]):
+    if registers.has_board(meta["config"]):
         reg, reg_sig = registers.interesting(window, before, n)
         sig.update(reg_sig)
     return talk or discovery or task or reg, sig
+
+
+def all_done(meta: dict, rec: dict) -> bool:
+    """tree and ring arms: does every agent hold a typed total (a "total" entry for each tree on an output, or a ring3 note)?
+    says nothing about whether the totals are right."""
+    cfg = meta["config"]
+    if cfg.get("protocol_hint") == "ring":
+        return all("3" in (a.get("ring_res") or {}) or "ring3" in (a.get("notes") or {}) for a in rec["agents"])
+    trees = set("AB"[:max(1, len((cfg.get("tree_roots") or [0])[:2]))])
+    return all({x for v, k in zip(a["outputs"], a.get("out_types", [])) if k == "tree"
+                for x, e in port_tree(v).items() if e[0] == "total"} >= trees for a in rec["agents"])
 
 
 def max_score(meta: dict) -> int:
@@ -1502,6 +1893,9 @@ async def run(path: Path, meta: dict, states: list[AgentState], start: int, end:
                     print(f"tick {t:4d}  {time.perf_counter() - t0:6.2f}s  agents with errors: {bad}{extra}", flush=True)
                 except (OSError, ValueError):
                     pass
+                if meta["config"].get("stop_when_done") and meta["config"].get("protocol_hint") and all_done(meta, rec):
+                    print(f"== every agent holds a total at t{t}: stopping", flush=True)
+                    break
                 if ratchet and len(window) >= ratchet and t < end:
                     keep, sig = interest(meta, window, done[-ratchet:])
                     verdict = {"tick": t, "window": ratchet, "keep": keep, **sig}
@@ -1535,11 +1929,11 @@ def main():
     ap.add_argument("--ticks", type=int, help="run until this tick number")
     ap.add_argument("--run-id", help="name for a new run")
     ap.add_argument("--resume", metavar="RUN", help="run id or path of a run to continue")
-    ap.add_argument("--agent", choices=["llm", "anthropic", "claudecode", "echo", "regfake"], help="override agent kind for a new run")
+    ap.add_argument("--agent", choices=["llm", "anthropic", "claudecode", "echo", "regfake", "scripted"], help="override agent kind for a new run")
     ap.add_argument("--world-seed", type=int, help="override world seed for a new run")
     ap.add_argument("--rows", type=int, help="override grid rows for a new run")
     ap.add_argument("--cols", type=int, help="override grid cols for a new run")
-    ap.add_argument("--topology", choices=["grid", "torus"], help="override topology for a new run")
+    ap.add_argument("--topology", choices=["grid", "torus", "tesseract"], help="override topology for a new run (tesseract: a directed 4-torus, rows = cols = side**2)")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                     help="override any config value for a new run, e.g. --set prime='' or "
                          "--set llm.max_tokens=2048 (VALUE is read as toml, else as a string)")
@@ -1553,6 +1947,17 @@ def main():
         p = Path(args.resume)
         path = p if p.is_file() else (p / "ticks.jsonl" if p.is_dir() else RUNS / args.resume / "ticks.jsonl")
         meta, ticks = load_run(path)
+        for kv in args.set:                 # overrides on resume too (e.g. llm.base_url when the run's server is gone)
+            key, _, raw = kv.partition("=")
+            try:
+                val = tomllib.loads(f"v = {raw}")["v"]
+            except tomllib.TOMLDecodeError:
+                val = raw
+            node = meta["config"]
+            *kpath, last = key.strip().split(".")
+            for part in kpath:
+                node = node.setdefault(part, {})
+            node[last] = val
         set_width(meta["config"])
         states = restore_states(meta, ticks)
         start = ticks[-1]["t"] + 1 if ticks else 1
@@ -1578,8 +1983,12 @@ def main():
             for part in path:
                 node = node.setdefault(part, {})
             node[last] = val
-        if cfg.get("topology", "grid") not in ("grid", "torus"):
-            sys.exit(f"config: topology must be grid or torus, got {cfg['topology']!r}")
+        if cfg.get("topology", "grid") not in ("grid", "torus", "tesseract"):
+            sys.exit(f"config: topology must be grid, torus or tesseract, got {cfg['topology']!r}")
+        if cfg.get("topology") == "tesseract":
+            side = int(cfg.get("side") or round(cfg["rows"] ** 0.5))
+            if cfg["rows"] != side * side or cfg["cols"] != side * side:
+                sys.exit(f"config: a tesseract of side {side} needs rows = cols = {side * side}, got {cfg['rows']}x{cfg['cols']}")
         set_width(cfg)
         path, meta = new_run(cfg, args.run_id)
         states = restore_states(meta, [])

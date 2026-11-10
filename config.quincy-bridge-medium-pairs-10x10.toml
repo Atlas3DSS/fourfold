@@ -1,0 +1,34 @@
+# fourfold 10x10 torus, 100 agents, the recipe that solved the 4x4 (owner 2026-11-09: "at 3:30 am do the same experiment that
+# succeeded but with the large 10x10 torus and then the tesseract"). Bridge (typed host-packed writes only), medium thinking, no stop
+# pulse, structure sentence, typed id:number pairs, notes cap 160. Six Flare steering servers (9440-9445), 24 replies in flight.
+
+agent = "llm"
+ticks = 60
+rows = 10
+cols = 10
+topology = "torus"
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+say_only = true
+structure_hint = true
+notes_max = 160
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+prime = "you aren't alone, coordinate to solve the problem provided"      # owner 2026-11-08; also passed as --set prime
+
+[llm]
+base_url = ["http://127.0.0.1:9440/v1", "http://127.0.0.1:9441/v1", "http://127.0.0.1:9442/v1", "http://127.0.0.1:9443/v1", "http://127.0.0.1:9444/v1", "http://127.0.0.1:9445/v1"]
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "medium"

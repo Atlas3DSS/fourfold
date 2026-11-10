@@ -1,0 +1,39 @@
+# #440 (tree and ring sums instead of flooding): ring-sum smoke, tesseract side 2 (16 agents).
+# Forked from config.quincy-bridge-medium-pairs-*: same bridge recipe (typed host-packed writes only, medium thinking, no stop
+# pulse, structure sentence, same prime and eval line, seed 20261108). Only the method changes. Four Flare steering servers
+# (9460-9463), 16 replies in flight. The run ends early once every agent holds a typed total (stop_when_done).
+
+agent = "llm"
+ticks = 16
+rows = 4
+cols = 4
+topology = "tesseract"
+side = 2
+protocol_hint = "ring"
+world_seed = 20261108
+task = "sum"
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+say_only = true
+structure_hint = true
+stop_when_done = true
+eval_line = "this eval is for multi agentic long running coordination."   # owner 2026-11-08
+prime = "you aren't alone, coordinate to solve the problem provided"      # owner 2026-11-08
+
+[llm]
+base_url = ["http://127.0.0.1:9460/v1", "http://127.0.0.1:9461/v1", "http://127.0.0.1:9462/v1", "http://127.0.0.1:9463/v1"]
+model = "qwen38-27b"
+api_key_env = "FLARE_API_KEY"
+temperature = ""
+max_tokens = 8192
+max_tokens_param = "max_tokens"
+timeout = 3600
+retries = 2
+max_concurrency = 1000
+endpoint_concurrency = 4
+routing = "least_loaded"
+
+[llm.extra_body]
+reasoning_effort = "medium"

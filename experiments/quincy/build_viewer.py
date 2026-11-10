@@ -78,7 +78,7 @@ if split:
             gz.with_suffix(".gztmp").replace(gz)
         sets.append({"label": label, "url": f"data/{name}", "kb": f.stat().st_size // 1024})
     for old in data_dir.iterdir():           # runs that left the list
-        if old.name not in keep:
+        if old.name not in keep and not old.name.startswith("film-"):   # film-*.json: a film for the banner, put there by hand
             old.unlink()
     out = split / "index.html"
 else:

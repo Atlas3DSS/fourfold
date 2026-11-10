@@ -1,0 +1,28 @@
+# #440: Claude Haiku 5.5 on the 256-agent tesseract (side 4) with a per-dimension ring sum. Bridge recipe, seed 20261108.
+
+agent = "claudecode"
+ticks = 40
+rows = 16
+cols = 16
+topology = "tesseract"
+side = 4
+world_seed = 20261108
+task = "sum"
+protocol_word_limit = 400
+log_lines_shown = 20
+store_prompts = true
+actions = true
+say_only = true
+structure_hint = true
+protocol_hint = "ring"
+eval_line = "this eval is for multi agentic long running coordination."
+prime = "you aren't alone, coordinate to solve the problem provided"
+
+[claudecode]
+model = "claude-haiku-5-5"
+effort = "medium"
+thinking = "adaptive"
+bin = "claude"
+timeout = 300
+retries = 2
+max_concurrency = 16

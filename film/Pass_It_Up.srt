@@ -1,0 +1,260 @@
+1
+00:00:01,399 --> 00:00:03,182
+Last night, sixteen monkeys found the
+
+2
+00:00:03,142 --> 00:00:04,830
+exact sum of their private numbers.
+
+3
+00:00:04,790 --> 00:00:06,808
+Each one is a language model: Qwen3.8-27B.
+
+4
+00:00:06,918 --> 00:00:08,263
+They did it by flooding.
+
+5
+00:00:08,223 --> 00:00:11,035
+Every monkey collected every other monkey's number,
+
+6
+00:00:10,995 --> 00:00:11,796
+two to a port.
+
+7
+00:00:11,907 --> 00:00:13,204
+So we made the grid bigger.
+
+8
+00:00:13,564 --> 00:00:14,580
+One hundred monkeys.
+
+9
+00:00:14,540 --> 00:00:16,969
+Sixty ticks later, not one had the sum: 0 of 100.
+
+10
+00:00:17,079 --> 00:00:19,270
+Each held about 90 of the 100 numbers.
+
+11
+00:00:19,230 --> 00:00:21,702
+Several announced the network was complete.
+
+12
+00:00:21,812 --> 00:00:23,215
+It wasn't the monkeys.
+
+13
+00:00:23,175 --> 00:00:25,320
+A port carries two numbers a tick.
+
+14
+00:00:25,280 --> 00:00:28,231
+Even perfect agents need 50 ticks to flood 100.
+
+15
+00:00:28,341 --> 00:00:29,468
+And every monkey's notes grow with the crowd:
+
+16
+00:00:29,428 --> 00:00:30,435
+prompts went from 1,300 tokens to 5,600.
+
+17
+00:00:30,795 --> 00:00:32,161
+The fix is from 1982.
+
+18
+00:00:32,121 --> 00:00:34,435
+Don't make everyone know everything.
+
+19
+00:00:34,395 --> 00:00:35,889
+Add it up along a tree.
+
+20
+00:00:36,000 --> 00:00:37,380
+One monkey starts a wave.
+
+21
+00:00:37,340 --> 00:00:40,167
+Whoever it reaches takes that neighbour as a parent,
+
+22
+00:00:40,127 --> 00:00:41,400
+and passes the wave on.
+
+23
+00:00:41,511 --> 00:00:43,945
+When everyone below a monkey has answered,
+
+24
+00:00:43,905 --> 00:00:45,313
+it sends up one message:
+
+25
+00:00:45,273 --> 00:00:46,396
+a sum, and a count.
+
+26
+00:00:46,356 --> 00:00:47,821
+The host does the adding.
+
+27
+00:00:47,932 --> 00:00:50,673
+The root gets the total, and knows it's complete.
+
+28
+00:00:50,633 --> 00:00:52,381
+Then the answer runs back down.
+
+29
+00:00:52,741 --> 00:00:55,808
+Same hundred monkeys. Same model. Tick 23:
+
+30
+00:00:55,768 --> 00:00:59,268
+the first exact total. Tick 33: all one hundred.
+
+31
+00:00:59,378 --> 00:01:01,987
+49,689. No wrong answers.
+
+32
+00:01:01,947 --> 00:01:06,509
+A perfect tree takes 32 ticks. They took 33.
+
+33
+00:01:06,618 --> 00:01:08,582
+Each tick ran in half the time (202 s against 375),
+
+34
+00:01:08,542 --> 00:01:09,677
+and the prompts stayed small.
+
+35
+00:01:10,036 --> 00:01:11,430
+A tree has one weakness.
+
+36
+00:01:11,390 --> 00:01:14,477
+One slip, and a whole branch vanishes without a sound.
+
+37
+00:01:14,587 --> 00:01:16,770
+It happened, in a Claude Haiku run.
+
+38
+00:01:16,730 --> 00:01:18,913
+One monkey waved at its own parent,
+
+39
+00:01:18,873 --> 00:01:21,851
+and 11 dropped out of the count: 44,294 over 89.
+
+40
+00:01:21,962 --> 00:01:23,764
+So grow two trees from two roots,
+
+41
+00:01:23,724 --> 00:01:26,006
+and trust the answer only when they agree.
+
+42
+00:01:25,966 --> 00:01:27,395
+The second tree caught it.
+
+43
+00:01:27,504 --> 00:01:29,801
+Now the host refuses that write. The rerun:
+
+44
+00:01:29,761 --> 00:01:31,481
+100 of 100, both trees agreeing.
+
+45
+00:01:31,841 --> 00:01:33,687
+It isn't one model's trick.
+
+46
+00:01:33,647 --> 00:01:36,028
+A swarm of 112 Claude Haiku agents,
+
+47
+00:01:35,988 --> 00:01:38,769
+across seven arrays joined by slow seams:
+
+48
+00:01:38,729 --> 00:01:41,311
+112 of 112 exact, for half the tokens.
+
+49
+00:01:41,671 --> 00:01:44,714
+Then the big one. 256 monkeys on a tesseract:
+
+50
+00:01:44,674 --> 00:01:47,717
+four dimensions, one ring through every port.
+
+51
+00:01:47,828 --> 00:01:51,298
+No tree here. Each monkey sends one entry around its ring,
+
+52
+00:01:51,258 --> 00:01:53,546
+and everyone it passes adds their own.
+
+53
+00:01:53,506 --> 00:01:55,617
+Four rings, and you hold the total.
+
+54
+00:01:55,725 --> 00:01:58,098
+Perfect agents need 17 ticks.
+
+55
+00:01:58,058 --> 00:02:00,029
+Flooding would need 128.
+
+56
+00:02:00,138 --> 00:02:02,785
+It broke. One monkey's number was counted twice,
+
+57
+00:02:02,745 --> 00:02:05,554
+and every monkey after it passed the mistake along.
+
+58
+00:02:05,664 --> 00:02:10,057
+Claude Haiku: 186 of 256 exact, 70 confidently wrong.
+
+59
+00:02:10,017 --> 00:02:13,426
+And Qwen3.8-27B failed with only sixteen.
+
+60
+00:02:13,536 --> 00:02:15,956
+A ring has no second tree to catch a slip.
+
+61
+00:02:15,916 --> 00:02:19,016
+So next, the host checks every write. That's tomorrow.
+
+62
+00:02:19,478 --> 00:02:21,152
+Nobody has to know everything.
+
+63
+00:02:21,112 --> 00:02:22,569
+But somebody has to check.
+
+64
+00:02:22,830 --> 00:02:24,157
+Pass it up, little monkeys.
+
+65
+00:02:24,117 --> 00:02:25,063
+We keep the ledger.
+

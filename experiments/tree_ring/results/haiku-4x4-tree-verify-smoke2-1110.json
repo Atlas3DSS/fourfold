@@ -1,0 +1,59 @@
+{
+ "run": "haiku-4x4-tree-verify-smoke2-1110",
+ "agents": 16,
+ "ticks": 20,
+ "true_sum": 6637,
+ "first_exact": 16,
+ "all_exact": 20,
+ "exact_at_end": 16,
+ "agents_ever_holding_a_wrong_total": 0,
+ "rejected_writes": 0,
+ "no_reply_turns": 0,
+ "median_prompt_tokens": {
+  "t1": 2,
+  "t10": 2,
+  "t30": null,
+  "t60": null
+ },
+ "median_tick_prompt_chars": {
+  "t1": 704,
+  "t10": 3841,
+  "t30": null,
+  "t60": null
+ },
+ "median_seconds_per_tick": 10.8,
+ "exact_by_tick": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1,
+  5,
+  11,
+  15,
+  16
+ ],
+ "eval_t20": {
+  "exact": 16,
+  "wrong": 0,
+  "no_number": 0,
+  "wrong_values": [],
+  "count_answers_min_median_max": [
+   16,
+   16,
+   16
+  ],
+  "count_exact": 16
+ }
+}
